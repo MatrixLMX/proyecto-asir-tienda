@@ -66,13 +66,20 @@ INSERT INTO compras (fecha, numero_factura, usuario, notas)
 VALUES (CURDATE() - INTERVAL 62 DAY, 'INV-INICIAL', 'admin', 'Inventario inicial');
 SET @compra = LAST_INSERT_ID();
 
-INSERT INTO lineas_compra (compra_id, producto_id, cantidad, coste_unitario, fecha_caducidad)
-SELECT @compra,
-       p.id,
-       IF(p.unidad_medida = 'kg', 300, 320),
-       ROUND(p.precio_venta / (1 + i.porcentaje / 100) * (0.55 + (p.id % 4) * 0.05), 4),
-       IF(p.controla_caducidad, CURDATE() + INTERVAL 120 DAY, NULL)
+-- MariaDB no permite que un trigger modifique "productos" mientras la
+-- misma sentencia la está leyendo (error 1442). Por eso las líneas se
+-- preparan antes en una tabla temporal.
+CREATE TEMPORARY TABLE tmp_lineas AS
+SELECT @compra AS compra_id,
+       p.id AS producto_id,
+       IF(p.unidad_medida = 'kg', 300, 320) AS cantidad,
+       ROUND(p.precio_venta / (1 + i.porcentaje / 100) * (0.55 + (p.id % 4) * 0.05), 4) AS coste_unitario,
+       IF(p.controla_caducidad, CURDATE() + INTERVAL 120 DAY, NULL) AS fecha_caducidad
   FROM productos p JOIN tipos_iva i ON i.id = p.iva_id;
+
+INSERT INTO lineas_compra (compra_id, producto_id, cantidad, coste_unitario, fecha_caducidad)
+SELECT compra_id, producto_id, cantidad, coste_unitario, fecha_caducidad FROM tmp_lineas;
+DROP TEMPORARY TABLE tmp_lineas;
 
 -- ---------------------------------------------------------------------
 --  Dos meses de ventas aleatorias
@@ -128,18 +135,22 @@ INSERT INTO compras (fecha, numero_factura, usuario, notas)
 VALUES (NOW(), 'DEMO-CAD', 'admin', 'Compra de ejemplo con caducidades cercanas');
 SET @compra = LAST_INSERT_ID();
 
-INSERT INTO lineas_compra (compra_id, producto_id, cantidad, coste_unitario, fecha_caducidad)
-SELECT @compra, id, 6, coste_medio,
+CREATE TEMPORARY TABLE tmp_lineas AS
+SELECT @compra AS compra_id, id AS producto_id, 6 AS cantidad, coste_medio AS coste_unitario,
        CASE nombre
          WHEN 'Sándwich mixto'       THEN CURDATE() + INTERVAL 1 DAY
          WHEN 'Yogur natural pack 4' THEN CURDATE() + INTERVAL 3 DAY
          WHEN 'Pan de molde'         THEN CURDATE()
          WHEN 'Palmera de chocolate' THEN CURDATE() - INTERVAL 1 DAY
-       END
+       END AS fecha_caducidad
   FROM productos
  WHERE nombre IN ('Sándwich mixto', 'Yogur natural pack 4', 'Pan de molde', 'Palmera de chocolate');
 
+INSERT INTO lineas_compra (compra_id, producto_id, cantidad, coste_unitario, fecha_caducidad)
+SELECT compra_id, producto_id, cantidad, coste_unitario, fecha_caducidad FROM tmp_lineas;
+DROP TEMPORARY TABLE tmp_lineas;
+
 -- Un producto en stock bajo para ver la alerta
+SELECT id, stock_actual - 2 INTO @pilas, @cantidad FROM productos WHERE nombre = 'Pilas AA pack 4';
 INSERT INTO mermas (producto_id, cantidad, motivo, usuario, notas)
-SELECT id, stock_actual - 2, 'otro', 'admin', 'Ajuste para la demo de stock bajo'
-  FROM productos WHERE nombre = 'Pilas AA pack 4';
+VALUES (@pilas, @cantidad, 'otro', 'admin', 'Ajuste para la demo de stock bajo');

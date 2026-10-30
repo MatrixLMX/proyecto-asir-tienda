@@ -2,7 +2,7 @@
 #   docker compose up --build
 # Web:        http://localhost:8080
 # API (docs): http://localhost:8000/api/docs
-# MariaDB:    localhost:3306 (para DBeaver)
+# MariaDB:    localhost:3307 (para DBeaver)
 services:
   db:
     image: mariadb:11.8
@@ -15,7 +15,7 @@ services:
       - ./sql:/docker-entrypoint-initdb.d:ro
       - datos-bd:/var/lib/mysql
     ports:
-      - "3306:3306"
+      - "3307:3306"   # 3307 en el PC por si ya hay un MySQL/MariaDB en el 3306
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 5s

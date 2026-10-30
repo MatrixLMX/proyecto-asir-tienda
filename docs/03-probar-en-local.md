@@ -32,7 +32,7 @@ Usuarios de prueba de la web (vienen en los datos de ejemplo):
 3. Abre:
    - Web: **http://localhost:8080**
    - Documentación de la API: http://localhost:8000/api/docs
-   - MariaDB para DBeaver: `localhost:3306`, usuario `tienda_admin`
+   - MariaDB para DBeaver: `localhost:3307`, usuario `tienda_admin`
 
 Para pararlo usa `Ctrl+C` o `docker compose down`. Para **borrar la BD y empezar de cero**: `docker compose down -v`.
 
