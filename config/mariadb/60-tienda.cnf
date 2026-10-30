@@ -1,0 +1,16 @@
+# /etc/mysql/mariadb.conf.d/60-tienda.cnf
+[mariadb]
+# Solo escucha en el propio servidor: la web está en la misma máquina y
+# el administrador entra con DBeaver a través de un túnel SSH.
+bind-address = 127.0.0.1
+
+character-set-server = utf8mb4
+collation-server     = utf8mb4_spanish_ci
+default-time-zone    = 'Europe/Madrid'
+
+max_connections = 50
+
+# Consultas lentas (más de 2 s) para detectar problemas
+slow_query_log      = 1
+slow_query_log_file = /var/log/mysql/mariadb-slow.log
+long_query_time     = 2

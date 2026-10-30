@@ -1,0 +1,24 @@
+# Secretos: nunca al repositorio
+.env
+*.pem
+*.key
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Node / build
+node_modules/
+dist/
+
+# Copias de seguridad y volcados
+*.sql.gz
+backups/
+
+# Sistema / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.tsbuildinfo

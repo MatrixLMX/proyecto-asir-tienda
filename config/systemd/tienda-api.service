@@ -1,0 +1,24 @@
+# /etc/systemd/system/tienda-api.service
+[Unit]
+Description=Tienda - API (FastAPI + asistente)
+After=network.target mariadb.service
+Requires=mariadb.service
+
+[Service]
+User=tienda
+Group=tienda
+WorkingDirectory=/opt/tienda/app/backend
+EnvironmentFile=/opt/tienda/.env
+# Un solo proceso: la memoria de las conversaciones del asistente vive en él
+ExecStart=/opt/tienda/app/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=5
+
+# Aislamiento básico del servicio
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

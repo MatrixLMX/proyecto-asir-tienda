@@ -1,0 +1,25 @@
+# /etc/fail2ban/jail.local
+# Bloquea en el cortafuegos las IP que fallan varias veces el login.
+
+[DEFAULT]
+# Debian 13 guarda los registros en journald, no en /var/log/auth.log
+backend   = systemd
+banaction = ufw
+bantime   = 1h
+findtime  = 10m
+maxretry  = 5
+ignoreip  = 127.0.0.1/8 ::1
+
+[sshd]
+enabled  = true
+maxretry = 3
+bantime  = 24h
+
+# Reincidentes: si una IP es bloqueada 3 veces en un día, 1 semana fuera
+[recidive]
+enabled  = true
+backend  = auto
+logpath  = /var/log/fail2ban.log
+bantime  = 1w
+findtime = 1d
+maxretry = 3
