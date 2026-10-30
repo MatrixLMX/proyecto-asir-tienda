@@ -160,8 +160,12 @@ _EXTRA_DEPENDIENTE = """- Esta persona tiene perfil de DEPENDIENTE: no tiene acc
   costes, márgenes ni beneficios. Si lo pide, explícale que eso solo lo ve el administrador."""
 
 
+_CLAVES = {"groq": "groq_api_key", "anthropic": "anthropic_api_key"}
+
+
 def asistente_disponible() -> bool:
-    return settings.llm_provider != "anthropic" or bool(settings.anthropic_api_key)
+    clave = _CLAVES.get(settings.llm_provider)
+    return clave is None or bool(getattr(settings, clave))
 
 
 def _agente(rol: str):
@@ -171,10 +175,12 @@ def _agente(rol: str):
         herramientas = _herramientas_comunes(rol)
         if rol == "admin":
             herramientas += _herramientas_admin()
+        campo_api_key = _CLAVES.get(settings.llm_provider)
         modelo = init_chat_model(
             settings.llm_model,
             model_provider=settings.llm_provider,
-            max_tokens=8000,
+            max_tokens=4000,
+            **({"api_key": getattr(settings, campo_api_key)} if campo_api_key else {}),
         )
         _agentes[clave] = create_agent(
             modelo,

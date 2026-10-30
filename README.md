@@ -10,7 +10,7 @@ Este proyecto monta un servidor **Debian 13** con **MariaDB** para una tienda de
 - **Controla las caducidades por lotes**, sin revisar producto a producto.
 - Tiene **dos perfiles**: el administrador lo ve todo; el dependiente vende y consulta stock, pero no ve costes ni beneficios.
 - Está **securizado** (SSH con claves, UFW, Fail2ban, HTTPS) y hace **copias de seguridad diarias** con restauración comprobada.
-- Incluye una **web moderna** con un **asistente virtual** (LangChain + LangGraph + Claude) al que se le pregunta en lenguaje natural: _"¿qué caduca esta semana?"_ o _"¿qué productos me dejan menos margen?"_.
+- Incluye una **web moderna** con un **asistente virtual** (LangChain + LangGraph + Groq) al que se le pregunta en lenguaje natural: _"¿qué caduca esta semana?"_ o _"¿qué productos me dejan menos margen?"_.
 
 ## Arquitectura
 
@@ -25,7 +25,7 @@ flowchart LR
         API -- usuario BD según perfil --> DB[(MariaDB<br/>127.0.0.1:3306)]
         CRON[cron 22:30<br/>mariadb-dump] --> DB
     end
-    API -. consultas del asistente .-> LLM[API de Claude]
+    API -. consultas del asistente .-> LLM[API de Groq]
     CRON -- rsync --> EXT[(Copia externa<br/>USB / otro equipo)]
 ```
 
@@ -69,6 +69,8 @@ Abre http://localhost:8080 y entra con `admin` / `admin1234` o `dependiente` / `
 
 ## Tecnologías
 
-Debian 13 · MariaDB 11.8 · OpenSSH · UFW · Fail2ban · Bash · cron · mariadb-dump · rsync · Apache 2 · Python 3 (FastAPI) · LangChain · LangGraph · React · Tailwind CSS · Docker (solo para pruebas) · Git / GitHub.
+Debian 13 · MariaDB 11.8 · OpenSSH · UFW · Fail2ban · Bash · cron · mariadb-dump · rsync · Apache 2 · Python 3 (FastAPI) · LangChain · LangGraph · Groq · React · Tailwind CSS · Docker (solo para pruebas) · Git / GitHub.
 
-Todo es software libre, salvo el modelo de lenguaje del asistente. El asistente es opcional: sin clave de API, el resto del sistema funciona igual.
+Todo es software libre, salvo el servicio del modelo de lenguaje del asistente (Groq, con capa gratuita). El asistente es opcional: sin clave de API, el resto del sistema funciona igual.
+
+La web tiene **tema claro y oscuro** (o automático según el sistema), está pensada también para el móvil y lee códigos de barras con un lector USB.

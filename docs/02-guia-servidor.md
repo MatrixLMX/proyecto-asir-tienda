@@ -189,7 +189,7 @@ ls -lh /var/backups/tienda/
 
 ## Fase 8. Web y asistente
 
-Si quieres el asistente, añade tu `ANTHROPIC_API_KEY` en `/opt/tienda/.env`. Luego:
+Si quieres el asistente, crea una clave gratuita en https://console.groq.com/keys y ponla en `GROQ_API_KEY` dentro de `/opt/tienda/.env`. Luego:
 
 ```bash
 sudo bash scripts/servidor/03_desplegar_web.sh

@@ -16,9 +16,11 @@ class Settings(BaseSettings):
     jwt_horas: int = 12
 
     # Asistente virtual (LangChain). Si no hay clave, el chat se desactiva.
+    # Por defecto Groq (tiene capa gratuita); también admite "anthropic".
+    llm_provider: str = "groq"
+    llm_model: str = "openai/gpt-oss-120b"
+    groq_api_key: str | None = None
     anthropic_api_key: str | None = None
-    llm_provider: str = "anthropic"
-    llm_model: str = "claude-opus-5-5"
 
     cors_origins: str = "http://localhost:5173"
 

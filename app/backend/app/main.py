@@ -81,8 +81,12 @@ def alertas_caducidad(u: Usuario = Depends(usuario_actual)):
 def resumen_hoy(u: Usuario = Depends(usuario_actual)):
     return consultar(
         u.rol,
-        "SELECT COUNT(*) AS tickets, COALESCE(SUM(total), 0) AS facturado "
-        "FROM ventas WHERE fecha >= CURDATE()",
+        "SELECT COALESCE(SUM(fecha >= CURDATE()), 0) AS tickets, "
+        "COALESCE(SUM(IF(fecha >= CURDATE(), total, 0)), 0) AS facturado, "
+        # Ayer solo hasta la misma hora, para comparar de forma justa
+        "COALESCE(SUM(fecha < NOW() - INTERVAL 1 DAY), 0) AS tickets_ayer, "
+        "COALESCE(SUM(IF(fecha < NOW() - INTERVAL 1 DAY, total, 0)), 0) AS facturado_ayer "
+        "FROM ventas WHERE fecha >= CURDATE() - INTERVAL 1 DAY",
     )[0]
 
 
@@ -289,7 +293,7 @@ class MensajeChat(BaseModel):
 @app.post("/api/asistente")
 async def chat(m: MensajeChat, u: Usuario = Depends(usuario_actual)):
     if not asistente.asistente_disponible():
-        raise HTTPException(503, "El asistente no está configurado (falta ANTHROPIC_API_KEY en .env)")
+        raise HTTPException(503, "El asistente no está configurado (falta la clave del proveedor en .env)")
     respuesta = await run_in_threadpool(
         asistente.preguntar, u.rol, u.usuario, m.conversacion, m.mensaje
     )

@@ -6,7 +6,7 @@ Antes de empezar, en la carpeta del proyecto:
 
 ```powershell
 copy .env.example .env
-notepad .env       # cambia las contraseñas; pega tu ANTHROPIC_API_KEY si quieres el asistente
+notepad .env       # cambia las contraseñas; pega tu GROQ_API_KEY (gratis en console.groq.com) si quieres el asistente
 ```
 
 Usuarios de prueba de la web (vienen en los datos de ejemplo):
