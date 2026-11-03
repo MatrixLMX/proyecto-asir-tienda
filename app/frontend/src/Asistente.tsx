@@ -87,7 +87,7 @@ export default function Asistente({ disponible, rol }: { disponible: boolean; ro
             {!disponible && (
               <div className="rounded-2xl border border-amber-300/50 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-200">
                 <p className="mb-1 font-semibold">El asistente no está activado</p>
-                Crea una clave gratuita en <b>console.groq.com</b>, ponla en <code>GROQ_API_KEY</code> del fichero <code>.env</code> y reinicia el backend.
+                Crea una clave gratuita en <b>aistudio.google.com/apikey</b>, ponla en <code>GOOGLE_API_KEY</code> del fichero <code>.env</code> y reinicia el backend.
               </div>
             )}
             {disponible && mensajes.length === 0 && (

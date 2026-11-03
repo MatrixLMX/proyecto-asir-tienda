@@ -160,7 +160,7 @@ _EXTRA_DEPENDIENTE = """- Esta persona tiene perfil de DEPENDIENTE: no tiene acc
   costes, márgenes ni beneficios. Si lo pide, explícale que eso solo lo ve el administrador."""
 
 
-_CLAVES = {"groq": "groq_api_key", "anthropic": "anthropic_api_key"}
+_CLAVES = {"google_genai": "google_api_key", "groq": "groq_api_key", "anthropic": "anthropic_api_key"}
 
 
 def asistente_disponible() -> bool:

@@ -16,9 +16,10 @@ class Settings(BaseSettings):
     jwt_horas: int = 12
 
     # Asistente virtual (LangChain). Si no hay clave, el chat se desactiva.
-    # Por defecto Groq (tiene capa gratuita); también admite "anthropic".
-    llm_provider: str = "groq"
-    llm_model: str = "openai/gpt-oss-120b"
+    # Por defecto Gemini (tiene capa gratuita); también admite "groq" y "anthropic".
+    llm_provider: str = "google_genai"
+    llm_model: str = "gemini-2.5-flash"
+    google_api_key: str | None = None
     groq_api_key: str | None = None
     anthropic_api_key: str | None = None
 
