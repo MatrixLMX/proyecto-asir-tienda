@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # Asistente virtual (LangChain). Si no hay clave, el chat se desactiva.
     # Por defecto Gemini (tiene capa gratuita); también admite "groq" y "anthropic".
     llm_provider: str = "google_genai"
-    llm_model: str = "gemini-2.5-flash"
+    llm_model: str = "gemini-flash-lite-latest"
     google_api_key: str | None = None
     groq_api_key: str | None = None
     anthropic_api_key: str | None = None

@@ -294,7 +294,15 @@ class MensajeChat(BaseModel):
 async def chat(m: MensajeChat, u: Usuario = Depends(usuario_actual)):
     if not asistente.asistente_disponible():
         raise HTTPException(503, "El asistente no está configurado (falta la clave del proveedor en .env)")
-    respuesta = await run_in_threadpool(
-        asistente.preguntar, u.rol, u.usuario, m.conversacion, m.mensaje
-    )
+    try:
+        respuesta = await run_in_threadpool(
+            asistente.preguntar, u.rol, u.usuario, m.conversacion, m.mensaje
+        )
+    except Exception as e:
+        # Errores del proveedor (cuota gratuita agotada, modelo saturado...):
+        # se avisa con un mensaje claro en vez de un error 500.
+        texto = str(e)
+        if "429" in texto or "RESOURCE_EXHAUSTED" in texto or "rate" in texto.lower():
+            raise HTTPException(429, "Se ha superado el límite gratuito de preguntas por minuto. Espera un momento y vuelve a probar.")
+        raise HTTPException(503, "El asistente no está disponible ahora mismo (el proveedor no responde). Prueba de nuevo en un rato.")
     return {"respuesta": respuesta}
