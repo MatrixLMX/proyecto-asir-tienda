@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Ban, Banknote, CreditCard, Download, Lock, Printer, Receipt, Smartphone, Wallet } from "lucide-react";
-import { borrar, cantidad, descargarCsv, diaISO, euros, fecha, fechaHora, post, type Venta } from "../api";
+import { borrar, cantidad, descargarCsv, diaISO, euros, fecha, fechaHora, post, textoPago, type Venta } from "../api";
 import type { PropsPagina } from "../App";
 import { imprimirTicket } from "../ticket";
 import { Cabecera, Confirmar, Esqueleto, Insignia, Kpi, Modal, Pestañas, Vacio, emitirCambio, useAviso, useDatos } from "../ui";
@@ -17,6 +17,7 @@ const METODOS: Record<Metodo, { nombre: string; icono: typeof Banknote }> = {
   efectivo: { nombre: "Efectivo", icono: Banknote },
   tarjeta: { nombre: "Tarjeta", icono: CreditCard },
   bizum: { nombre: "Bizum", icono: Smartphone },
+  mixto: { nombre: "Mixto", icono: Wallet },
 };
 
 export default function Ventas({ usuario }: PropsPagina) {
@@ -88,10 +89,10 @@ function Tickets({ esAdmin }: { esAdmin: boolean }) {
         </div>
         <select className="campo w-auto py-1.5" aria-label="Forma de pago" value={metodo} onChange={(e) => { setMetodo(e.target.value as Metodo | ""); setPagina(1); }}>
           <option value="">Todas las formas de pago</option>
-          {Object.entries(METODOS).map(([id, m]) => <option key={id} value={id}>{m.nombre}</option>)}
+          {Object.entries(METODOS).map(([id, m]) => <option key={id} value={id}>{id === "mixto" ? "Solo pagos mixtos" : `Con ${m.nombre.toLowerCase()} (también mixtos)`}</option>)}
         </select>
         <button className="boton-sec ml-auto py-1.5" disabled={!datos?.ventas.length}
-          onClick={() => datos && descargarCsv(`tickets_${desde}_${hasta}`, datos.ventas, [["id", "Ticket"], ["fecha", "Fecha"], ["metodo_pago", "Pago"], ["lineas", "Líneas"], ["usuario", "Usuario"], ["total", "Total"]])}>
+          onClick={() => datos && descargarCsv(`tickets_${desde}_${hasta}`, datos.ventas, [["id", "Ticket"], ["fecha", "Fecha"], ["metodo_pago", "Pago"], ["pago_tarjeta", "Tarjeta (mixto)"], ["pago_bizum", "Bizum (mixto)"], ["lineas", "Líneas"], ["usuario", "Usuario"], ["total", "Total"]])}>
           <Download className="size-4" /> CSV
         </button>
       </div>
@@ -116,7 +117,7 @@ function Tickets({ esAdmin }: { esAdmin: boolean }) {
                   <tr key={v.id} className="cursor-pointer hover:bg-superficie-2/60" onClick={() => setAbierta(v.id)}>
                     <td className="font-medium tabular-nums">{v.id}</td>
                     <td className="text-suave">{fechaHora(v.fecha)}</td>
-                    <td><span className="inline-flex items-center gap-1.5 text-suave"><M.icono className="size-4" />{M.nombre}</span></td>
+                    <td><span className="inline-flex items-center gap-1.5 text-suave" title={textoPago(v)}><M.icono className="size-4" />{M.nombre}</span></td>
                     <td className="hidden tabular-nums text-suave sm:table-cell">{v.lineas}</td>
                     <td className="hidden text-suave md:table-cell">{v.usuario ?? "—"}</td>
                     <td className="text-right font-semibold tabular-nums">{euros(v.total)}</td>
@@ -140,7 +141,7 @@ function Tickets({ esAdmin }: { esAdmin: boolean }) {
         {!detalle.datos || detalle.datos.id !== abierta ? <Esqueleto className="h-40" /> : (
           <>
             <p className="mb-3 text-sm text-suave">
-              {fechaHora(detalle.datos.fecha)} · {METODOS[detalle.datos.metodo_pago].nombre} · {detalle.datos.usuario ?? "—"}
+              {fechaHora(detalle.datos.fecha)} · {textoPago(detalle.datos)} · {detalle.datos.usuario ?? "—"}
             </p>
             <ul className="mb-4 max-h-[45vh] divide-y divide-borde overflow-y-auto rounded-xl border border-borde">
               {detalle.datos.lineas?.map((l, i) => (

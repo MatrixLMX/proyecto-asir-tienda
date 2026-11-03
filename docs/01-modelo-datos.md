@@ -66,7 +66,9 @@ Las claves primarias van **en negrita** y las ajenas en _cursiva_.
 - **compras** (**id**, _proveedor_id_, fecha, numero_factura, total_sin_iva, usuario, notas)
 - **lineas_compra** (**id**, _compra_id_, _producto_id_, cantidad, coste_unitario, fecha_caducidad)
 - **lotes** (**id**, _producto_id_, _linea_compra_id_, fecha_entrada, fecha_caducidad, cantidad_inicial, cantidad_restante)
-- **ventas** (**id**, fecha, metodo_pago, total, usuario)
+- **ventas** (**id**, fecha, metodo_pago, pago_tarjeta, pago_bizum, total, usuario)
+
+  `metodo_pago` puede ser `efectivo`, `tarjeta`, `bizum` o `mixto`. En un pago mixto se guarda lo cobrado con tarjeta y con Bizum, y el efectivo es lo que falta hasta el total: así el reparto siempre suma el total del ticket.
 - **lineas_venta** (**id**, _venta_id_, _producto_id_, cantidad, precio_unitario, iva_porcentaje, coste_unitario)
 - **mermas** (**id**, _producto_id_, _lote_id_, cantidad, motivo, coste_unitario, fecha, usuario, notas)
 - **lotes_consumidos** (**id**, _linea_venta_id_, _lote_id_, cantidad)
@@ -133,7 +135,8 @@ Funciones auxiliares: `fmt_euros` y `fmt_cantidad` dan formato español a los te
 | `v_beneficio_mensual` | admin | Beneficio neto del mes (descontadas las mermas) **comparado con la estimación antigua del 15 %** |
 | `v_ventas_diarias` | admin | Tickets, facturación y ticket medio por día |
 | `v_lineas_ticket` | todos | Líneas de un ticket **sin costes** (consultar e imprimir tickets) |
-| `v_caja_diaria` | todos | Lo cobrado cada día en efectivo, tarjeta y Bizum (cierre de caja) |
+| `v_caja_diaria` | todos | Lo cobrado cada día en efectivo, tarjeta y Bizum, repartiendo los pagos mixtos (cierre de caja) |
+| `v_mas_vendidos` | todos | En cuántos tickets ha salido cada producto en los últimos 60 días (accesos rápidos de Vender) |
 | `v_productos_parados` | todos | Productos con stock y días que llevan sin venderse |
 
 ## 1.7 Perfiles y permisos
@@ -143,7 +146,7 @@ Los permisos se controlan **en MariaDB** con roles. La web se conecta con un usu
 | Rol | Usuario BD | Puede |
 |---|---|---|
 | `rol_admin` | `tienda_admin` | Leer y escribir todos los datos (no cambiar la estructura) |
-| `rol_dependiente` | `tienda_dependiente` | Consultar `v_stock`, `v_alertas_stock`, `v_caducidades`, `v_lineas_ticket`, `v_caja_diaria` y `v_productos_parados`; registrar ventas (solo producto y cantidad, el precio lo pone el trigger), mermas y el cierre de caja. No puede anular ventas |
+| `rol_dependiente` | `tienda_dependiente` | Consultar `v_stock`, `v_alertas_stock`, `v_caducidades`, `v_lineas_ticket`, `v_caja_diaria`, `v_productos_parados` y `v_mas_vendidos`; registrar ventas (solo producto y cantidad, el precio lo pone el trigger), mermas y el cierre de caja. No puede anular ventas |
 | `rol_auth` | `tienda_auth` | Leer `usuarios_app` para el login y cambiar **solo** la columna `password_hash` (cambio de contraseña) |
 
 Las contraseñas de la web se guardan con **bcrypt**, nunca en claro.

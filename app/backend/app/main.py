@@ -161,17 +161,33 @@ class LineaVenta(BaseModel):
 
 
 class NuevaVenta(BaseModel):
-    metodo_pago: Literal["efectivo", "tarjeta", "bizum"] = "efectivo"
+    metodo_pago: Literal["efectivo", "tarjeta", "bizum", "mixto"] = "efectivo"
+    # Solo para "mixto": lo que se paga con tarjeta y con Bizum. El resto
+    # del total se paga en efectivo.
+    pago_tarjeta: float = Field(default=0, ge=0)
+    pago_bizum: float = Field(default=0, ge=0)
     lineas: list[LineaVenta] = Field(min_length=1)
+
+
+# "Pagado (en todo o en parte) con..." para filtrar el historial
+_FILTRO_METODO = {
+    "efectivo": "(metodo_pago = 'efectivo' OR (metodo_pago = 'mixto' AND total > pago_tarjeta + pago_bizum))",
+    "tarjeta": "(metodo_pago = 'tarjeta' OR pago_tarjeta > 0)",
+    "bizum": "(metodo_pago = 'bizum' OR pago_bizum > 0)",
+    "mixto": "metodo_pago = 'mixto'",
+}
 
 
 @app.post("/api/ventas")
 def registrar_venta(v: NuevaVenta, u: Usuario = Depends(usuario_actual)):
     # Toda la venta en una transacción: si una línea falla (sin stock),
     # no se guarda nada.
+    mixto = v.metodo_pago == "mixto"
+    tarjeta = round(v.pago_tarjeta, 2) if mixto else 0
+    bizum = round(v.pago_bizum, 2) if mixto else 0
     with conexion(u.rol, u.usuario) as con, con.cursor() as cur:
-        cur.execute("INSERT INTO ventas (metodo_pago, usuario) VALUES (%s, %s)",
-                    (v.metodo_pago, u.usuario))
+        cur.execute("INSERT INTO ventas (metodo_pago, pago_tarjeta, pago_bizum, usuario) VALUES (%s, %s, %s, %s)",
+                    (v.metodo_pago, tarjeta, bizum, u.usuario))
         venta_id = cur.lastrowid
         for l in v.lineas:
             cur.execute(
@@ -180,19 +196,34 @@ def registrar_venta(v: NuevaVenta, u: Usuario = Depends(usuario_actual)):
             )
         cur.execute("SELECT id, fecha, total FROM ventas WHERE id = %s", (venta_id,))
         fila = cur.fetchone()
-    return {"id": fila["id"], "fecha": fila["fecha"].isoformat(), "total": float(fila["total"])}
+        total = float(fila["total"])
+        if mixto:
+            # Lanzar el error dentro del "with" deshace toda la venta
+            efectivo = round(total - tarjeta - bizum, 2)
+            if efectivo < 0:
+                raise HTTPException(400, f"Con tarjeta y Bizum se cobra más que el total ({total:.2f} €)".replace(".", ","))
+            if sum(1 for x in (efectivo, tarjeta, bizum) if x > 0) < 2:
+                raise HTTPException(400, "Un pago mixto necesita al menos dos formas de pago")
+    return {"id": fila["id"], "fecha": fila["fecha"].isoformat(), "total": total}
+
+
+@app.get("/api/productos/mas-vendidos")
+def mas_vendidos(limite: int = Query(12, ge=1, le=48), u: Usuario = Depends(usuario_actual)):
+    """Productos que salen en más tickets (últimos 60 días)."""
+    return [f["producto_id"] for f in consultar(
+        u.rol, "SELECT producto_id FROM v_mas_vendidos ORDER BY tickets DESC, producto_id LIMIT %s", (limite,))]
 
 
 @app.get("/api/ventas")
 def listar_ventas(desde: date | None = None, hasta: date | None = None,
-                  metodo: Literal["efectivo", "tarjeta", "bizum"] | None = None,
+                  metodo: Literal["efectivo", "tarjeta", "bizum", "mixto"] | None = None,
                   pagina: int = Query(1, ge=1), por_pagina: int = 50,
                   u: Usuario = Depends(usuario_actual)):
     desde = desde or date.today()
     hasta = hasta or date.today()
     por_pagina = max(1, min(por_pagina, 200))
-    filtro = "fecha >= %s AND fecha < %s + INTERVAL 1 DAY" + (" AND metodo_pago = %s" if metodo else "")
-    params = (desde, hasta) + ((metodo,) if metodo else ())
+    filtro = "fecha >= %s AND fecha < %s + INTERVAL 1 DAY" + (f" AND {_FILTRO_METODO[metodo]}" if metodo else "")
+    params = (desde, hasta)
     resumen = consultar(
         u.rol,
         f"SELECT COUNT(*) AS tickets, COALESCE(SUM(total), 0) AS total FROM ventas WHERE {filtro}",
@@ -200,7 +231,7 @@ def listar_ventas(desde: date | None = None, hasta: date | None = None,
     )[0]
     filas = consultar(
         u.rol,
-        "SELECT v.id, v.fecha, v.metodo_pago, v.total, v.usuario, "
+        "SELECT v.id, v.fecha, v.metodo_pago, v.pago_tarjeta, v.pago_bizum, v.total, v.usuario, "
         "(SELECT COUNT(*) FROM v_lineas_ticket t WHERE t.venta_id = v.id) AS lineas "
         f"FROM ventas v WHERE {filtro} ORDER BY v.fecha DESC, v.id DESC LIMIT %s OFFSET %s",
         params + (por_pagina, (pagina - 1) * por_pagina),

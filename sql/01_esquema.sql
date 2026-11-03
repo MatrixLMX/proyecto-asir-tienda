@@ -133,9 +133,14 @@ CREATE TABLE lotes (
 CREATE TABLE ventas (
   id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   fecha        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  metodo_pago  ENUM('efectivo','tarjeta','bizum') NOT NULL DEFAULT 'efectivo',
+  metodo_pago  ENUM('efectivo','tarjeta','bizum','mixto') NOT NULL DEFAULT 'efectivo',
+  -- Solo en pagos mixtos: lo cobrado con tarjeta y con Bizum. El resto
+  -- del total es efectivo (así siempre suma el total del ticket).
+  pago_tarjeta DECIMAL(12,2) NOT NULL DEFAULT 0,
+  pago_bizum   DECIMAL(12,2) NOT NULL DEFAULT 0,
   total        DECIMAL(12,2) NOT NULL DEFAULT 0,
   usuario      VARCHAR(40)   NULL,
+  CONSTRAINT chk_venta_pagos CHECK (pago_tarjeta >= 0 AND pago_bizum >= 0),
   INDEX idx_venta_fecha (fecha)
 ) ENGINE=InnoDB;
 

@@ -299,3 +299,42 @@ def test_alta_sin_fecha_de_un_producto_que_caduca_no_guarda_nada():
 def test_codigo_no_valido_y_solo_admin():
     assert cliente.get("/api/codigo/abc", headers=ADMIN).status_code == 400
     assert cliente.get("/api/codigo/8410000000000", headers=DEPENDIENTE).status_code == 403
+
+
+# ---------------------------------------------------------------------
+#  Pago mixto y más vendidos
+# ---------------------------------------------------------------------
+def _caja_hoy() -> dict:
+    return cliente.get("/api/caja", headers=DEPENDIENTE).json()
+
+
+def test_pago_mixto_reparte_la_caja():
+    agua = _producto("Agua mineral 1,5 L")
+    antes = _caja_hoy()
+    r = cliente.post("/api/ventas", headers=DEPENDIENTE, json={
+        "metodo_pago": "mixto", "pago_tarjeta": 1.0, "lineas": [{"producto_id": agua["id"], "cantidad": 4}]})
+    assert r.status_code == 200, r.text
+    vid, total = r.json()["id"], r.json()["total"]
+    try:
+        despues = _caja_hoy()
+        assert round(despues["total_tarjeta"] - antes["total_tarjeta"], 2) == 1.0
+        assert round(despues["total_efectivo"] - antes["total_efectivo"], 2) == round(total - 1.0, 2)
+        hoy = cliente.get("/api/ventas?metodo=tarjeta", headers=DEPENDIENTE).json()["ventas"]
+        assert any(v["id"] == vid for v in hoy)
+    finally:
+        assert cliente.delete(f"/api/ventas/{vid}", headers=ADMIN).status_code == 200
+
+
+def test_pago_mixto_que_no_cuadra_no_guarda_nada():
+    agua = _producto("Agua mineral 1,5 L")
+    stock = float(agua["stock_actual"])
+    for pagos in ({"pago_tarjeta": 500}, {"pago_tarjeta": 0, "pago_bizum": 0}):
+        r = cliente.post("/api/ventas", headers=DEPENDIENTE, json={
+            "metodo_pago": "mixto", **pagos, "lineas": [{"producto_id": agua["id"], "cantidad": 1}]})
+        assert r.status_code == 400
+    assert float(_producto("Agua mineral 1,5 L")["stock_actual"]) == stock
+
+
+def test_mas_vendidos():
+    ids = cliente.get("/api/productos/mas-vendidos", headers=DEPENDIENTE).json()
+    assert 0 < len(ids) <= 12 and all(isinstance(i, int) for i in ids)

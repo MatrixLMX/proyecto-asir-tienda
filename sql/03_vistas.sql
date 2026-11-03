@@ -83,16 +83,31 @@ SELECT lv.venta_id,
   FROM lineas_venta lv
   JOIN productos p ON p.id = lv.producto_id;
 
--- Caja de cada día por forma de pago (para el cierre de caja)
+-- Caja de cada día por forma de pago (para el cierre de caja). Un pago
+-- mixto reparte su total: tarjeta y Bizum lo indicado, efectivo el resto.
 CREATE OR REPLACE VIEW v_caja_diaria AS
 SELECT DATE(fecha) AS dia,
        COUNT(*)    AS tickets,
-       SUM(IF(metodo_pago = 'efectivo', total, 0)) AS total_efectivo,
-       SUM(IF(metodo_pago = 'tarjeta',  total, 0)) AS total_tarjeta,
-       SUM(IF(metodo_pago = 'bizum',    total, 0)) AS total_bizum,
+       SUM(CASE metodo_pago WHEN 'efectivo' THEN total
+                            WHEN 'mixto'    THEN total - pago_tarjeta - pago_bizum ELSE 0 END) AS total_efectivo,
+       SUM(CASE metodo_pago WHEN 'tarjeta'  THEN total
+                            WHEN 'mixto'    THEN pago_tarjeta ELSE 0 END) AS total_tarjeta,
+       SUM(CASE metodo_pago WHEN 'bizum'    THEN total
+                            WHEN 'mixto'    THEN pago_bizum ELSE 0 END) AS total_bizum,
        SUM(total)  AS total
   FROM ventas
  GROUP BY DATE(fecha);
+
+-- Lo que más se vende (en cuántos tickets aparece en los últimos 60
+-- días): accesos rápidos de la pantalla Vender
+CREATE OR REPLACE VIEW v_mas_vendidos AS
+SELECT lv.producto_id,
+       COUNT(DISTINCT lv.venta_id) AS tickets
+  FROM lineas_venta lv
+  JOIN ventas v    ON v.id = lv.venta_id
+  JOIN productos p ON p.id = lv.producto_id
+ WHERE v.fecha >= CURDATE() - INTERVAL 60 DAY AND p.activo
+ GROUP BY lv.producto_id;
 
 -- Productos con stock que no se venden: días desde la última venta
 CREATE OR REPLACE VIEW v_productos_parados AS

@@ -25,12 +25,13 @@ Arriba (o en **Más**, en el móvil) puedes elegir el tema **claro**, **oscuro**
 
 1. Entra en **Vender**.
 2. Añade productos:
-   - **Tocándolos** en la lista (puedes filtrar por categoría arriba).
+   - **Tocándolos** en la lista. Al entrar se ven los **Más vendidos** (los 12 productos que salen en más tickets de los últimos 60 días); con **Todas** o una categoría se ve el resto.
    - **Escaneando el código de barras** con el lector o con la cámara (ver [Escanear códigos de barras](#escanear-códigos-de-barras)).
    - **Buscando** por nombre.
 3. Los productos **a peso** (patatas, cebollas, ajos) se añaden con 0,5 kg. Cambia el peso escribiéndolo (con coma: `1,25`) o con los botones rápidos (0,25 · 0,5 · 1 · 2 kg). Si el peso se queda vacío, no se puede cobrar hasta escribirlo.
 4. Pulsa **Cobrar** (o la tecla **F2**).
-5. Elige **Efectivo**, **Tarjeta** o **Bizum**. Con efectivo, escribe lo que te da el cliente (o pulsa un billete) y la web calcula el **cambio**.
+5. Elige **Efectivo**, **Tarjeta**, **Bizum** o **Mixto**. Con efectivo, escribe lo que te da el cliente (o pulsa un billete) y la web calcula el **cambio**.
+   - **Mixto** (por ejemplo, 10 € en efectivo y el resto con tarjeta): escribe lo que se paga de cada forma; el botón **Resto** pone lo que falta. Si en efectivo te dan de más, calcula el cambio. En el cierre de caja cada parte cuenta en su forma de pago.
 6. Pulsa **Confirmar venta** (o **Intro**). El stock se descuenta solo.
 7. Si el cliente quiere el ticket: **Imprimir ticket nº …** debajo del botón Cobrar.
 

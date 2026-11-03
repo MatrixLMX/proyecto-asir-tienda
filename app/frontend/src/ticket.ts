@@ -1,4 +1,4 @@
-import { api, euros, type Venta } from "./api";
+import { NOMBRE_PAGO, api, euros, partesPago, type Venta } from "./api";
 
 /** Datos de la tienda que salen en la web y en el ticket (vienen del .env del servidor). */
 export interface DatosTienda { nombre: string; nif: string; direccion: string }
@@ -21,7 +21,7 @@ function htmlTicket(v: Venta, cambio?: { entregado: number; cambio: number }) {
     <tr><td colspan="2">${escapar(l.producto)}</td></tr>
     <tr class="det"><td>${l.unidad_medida === "kg" ? `${num(l.cantidad, 3)} kg` : num(l.cantidad, 0)} × ${num(l.precio_unitario)}</td><td class="d">${num(l.importe)}</td></tr>`).join("");
   const fecha = new Date(v.fecha).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" });
-  const pago = { efectivo: "Efectivo", tarjeta: "Tarjeta", bizum: "Bizum" }[v.metodo_pago];
+  const pagos = partesPago(v).map((p) => `<tr><td>${NOMBRE_PAGO[p.metodo]}</td><td class="d">${num(p.importe)}</td></tr>`).join("");
 
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Ticket ${v.id}</title><style>
     @page { size: 80mm auto; margin: 4mm; }
@@ -37,7 +37,8 @@ function htmlTicket(v: Venta, cambio?: { entregado: number; cambio: number }) {
     <hr><div>Factura simplificada nº ${v.id}</div><div>${fecha}</div><hr>
     <table>${filas}</table><hr>
     <table><tr class="total"><td>TOTAL</td><td class="d">${euros(v.total)}</td></tr>
-      <tr><td>${pago}</td><td class="d">${cambio ? `Entregado ${num(cambio.entregado)} · Cambio ${num(cambio.cambio)}` : ""}</td></tr></table>
+      ${pagos}
+      ${cambio ? `<tr><td>Entregado en efectivo</td><td class="d">${num(cambio.entregado)}</td></tr><tr><td>Cambio</td><td class="d">${num(cambio.cambio)}</td></tr>` : ""}</table>
     <hr><table class="iva"><tr><td>IVA</td><td>Base</td><td>Cuota</td><td>Total</td></tr>${desglose}</table>
     <hr><div class="c">IVA incluido · Gracias por su compra</div>
   </body></html>`;
