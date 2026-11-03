@@ -9,7 +9,7 @@ const VENTAJAS = [
   { icono: BarChart3, texto: "Beneficio real, no una estimación" },
 ];
 
-export default function Login({ alEntrar }: { alEntrar: (u: Usuario) => void }) {
+export default function Login({ alEntrar, nombreTienda }: { alEntrar: (u: Usuario) => void; nombreTienda: string }) {
   const [usuario, setUsuario] = useState("");
   const [password, setPassword] = useState("");
   const [ver, setVer] = useState(false);
@@ -39,7 +39,7 @@ export default function Login({ alEntrar }: { alEntrar: (u: Usuario) => void }) 
         <div className="absolute -bottom-32 -left-16 size-96 rounded-full bg-emerald-300/10 blur-3xl" />
         <div className="relative flex items-center gap-3">
           <div className="grid size-11 place-items-center rounded-2xl bg-white/15 backdrop-blur"><Store className="size-6" /></div>
-          <span className="text-xl font-bold">Mi Tienda</span>
+          <span className="text-xl font-bold">{nombreTienda}</span>
         </div>
         <div className="relative">
           <h2 className="max-w-md text-4xl font-bold leading-tight tracking-tight">Toda la tienda, en orden y sin libreta.</h2>

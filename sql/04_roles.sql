@@ -27,6 +27,15 @@ GRANT SELECT ON tienda.v_alertas_stock TO rol_dependiente;
 GRANT SELECT ON tienda.v_caducidades   TO rol_dependiente;
 GRANT SELECT ON tienda.categorias      TO rol_dependiente;
 GRANT SELECT ON tienda.ventas          TO rol_dependiente;
+GRANT SELECT ON tienda.v_lineas_ticket TO rol_dependiente;
+GRANT SELECT ON tienda.v_caja_diaria   TO rol_dependiente;
+GRANT SELECT ON tienda.v_productos_parados TO rol_dependiente;
+GRANT SELECT ON tienda.cierres_caja    TO rol_dependiente;
+
+-- Dependiente: cerrar la caja del día
+GRANT INSERT (fecha, tickets, total_efectivo, total_tarjeta, total_bizum,
+              fondo_inicial, efectivo_contado, usuario, notas)
+  ON tienda.cierres_caja TO rol_dependiente;
 
 -- Dependiente: registrar ventas. Solo puede indicar qué y cuánto; el
 -- precio, el IVA y el coste los pone el trigger.
@@ -37,5 +46,7 @@ GRANT INSERT (venta_id, producto_id, cantidad) ON tienda.lineas_venta TO rol_dep
 GRANT INSERT (producto_id, lote_id, cantidad, motivo, usuario, notas)
   ON tienda.mermas TO rol_dependiente;
 
--- Login de la aplicación web
+-- Login de la aplicación web. Puede cambiar SOLO la contraseña (la
+-- web comprueba antes la contraseña actual), no el perfil.
 GRANT SELECT ON tienda.usuarios_app TO rol_auth;
+GRANT UPDATE (password_hash) ON tienda.usuarios_app TO rol_auth;

@@ -26,7 +26,13 @@ class ErrorNegocio(Exception):
 
 
 @contextmanager
-def conexion(rol: str):
+def conexion(rol: str, usuario_app: str | None = None):
+    """Abre una conexión con el usuario de MariaDB del perfil.
+
+    usuario_app es el usuario de la web que hace el cambio: se guarda en
+    la variable de sesión @usuario_app y los triggers de auditoría lo
+    apuntan en la tabla auditoria.
+    """
     usuario, password = _CREDENCIALES[rol]
     con = pymysql.connect(
         host=settings.db_host,
@@ -39,6 +45,9 @@ def conexion(rol: str):
         autocommit=False,
     )
     try:
+        if usuario_app:
+            with con.cursor() as cur:
+                cur.execute("SET @usuario_app = %s", (usuario_app,))
         yield con
         con.commit()
     except pymysql.err.MySQLError as e:
@@ -66,7 +75,7 @@ def _limpiar(fila: dict) -> dict:
     return out
 
 
-def consultar(rol: str, sql: str, params: tuple | dict = ()) -> list[dict]:
-    with conexion(rol) as con, con.cursor() as cur:
+def consultar(rol: str, sql: str, params: tuple | dict = (), usuario_app: str | None = None) -> list[dict]:
+    with conexion(rol, usuario_app) as con, con.cursor() as cur:
         cur.execute(sql, params)
         return [_limpiar(f) for f in cur.fetchall()]

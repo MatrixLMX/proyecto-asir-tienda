@@ -9,8 +9,10 @@ User=tienda
 Group=tienda
 WorkingDirectory=/opt/tienda/app/backend
 EnvironmentFile=/opt/tienda/.env
-# Un solo proceso: la memoria de las conversaciones del asistente vive en él
-ExecStart=/opt/tienda/app/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+# Un solo proceso: la memoria del asistente y el límite de intentos de
+# login viven en él. --proxy-headers: la IP real del cliente la pasa Apache
+# (la necesita Fail2ban para bloquear al que falla el login)
+ExecStart=/opt/tienda/app/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 \n          --proxy-headers --forwarded-allow-ips 127.0.0.1
 Restart=on-failure
 RestartSec=5
 

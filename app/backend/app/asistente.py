@@ -13,6 +13,7 @@ from datetime import date
 from typing import Literal
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import ModelFallbackMiddleware, ModelRetryMiddleware
 from langchain.chat_models import init_chat_model
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
@@ -65,7 +66,30 @@ def _herramientas_comunes(rol: str):
             "FROM ventas WHERE fecha >= CURDATE()",
         ))
 
-    return [buscar_productos, productos_con_stock_bajo, productos_que_caducan, ventas_de_hoy]
+    @tool
+    def productos_sin_vender(dias: int = 30) -> str:
+        """Productos con stock que llevan al menos esos días sin venderse (género parado)."""
+        return _json(consultar(
+            rol,
+            "SELECT producto, categoria, unidad_medida, stock_actual, ultima_venta, dias_sin_vender "
+            "FROM v_productos_parados WHERE dias_sin_vender >= %s ORDER BY dias_sin_vender DESC LIMIT 30",
+            (dias,),
+        ))
+
+    @tool
+    def caja_por_forma_de_pago(dias: int = 7) -> str:
+        """Tickets y total cobrado en efectivo, tarjeta y Bizum en cada uno de los últimos días,
+        y si la caja de ese día se cerró y con qué diferencia (descuadre) de efectivo."""
+        return _json(consultar(
+            rol,
+            "SELECT d.*, c.efectivo_contado, c.diferencia AS descuadre_efectivo "
+            "FROM v_caja_diaria d LEFT JOIN cierres_caja c ON c.fecha = d.dia "
+            "WHERE d.dia >= CURDATE() - INTERVAL %s DAY ORDER BY d.dia DESC",
+            (dias,),
+        ))
+
+    return [buscar_productos, productos_con_stock_bajo, productos_que_caducan, ventas_de_hoy,
+            productos_sin_vender, caja_por_forma_de_pago]
 
 
 def _herramientas_admin():
@@ -137,8 +161,30 @@ def _herramientas_admin():
             (dias,),
         ))
 
+    @tool
+    def pedido_sugerido() -> str:
+        """Qué pedir a cada proveedor (productos con stock bajo), cuánto y el coste estimado sin IVA."""
+        return _json(consultar(
+            rol,
+            "SELECT COALESCE(a.proveedor, 'Sin proveedor') AS proveedor, a.producto, a.unidad_medida, "
+            "a.stock_actual, a.cantidad_sugerida, ROUND(a.cantidad_sugerida * p.coste_medio, 2) AS coste_estimado "
+            "FROM v_alertas_stock a JOIN productos p ON p.id = a.id ORDER BY proveedor, a.producto",
+        ))
+
+    @tool
+    def cambios_recientes(dias: int = 7) -> str:
+        """Registro de auditoría: cambios de precio, ventas anuladas, compras borradas, mermas
+        y cambios de usuarios en los últimos días, con quién lo hizo."""
+        return _json(consultar(
+            rol,
+            "SELECT fecha, usuario, accion, detalle FROM auditoria "
+            "WHERE fecha >= CURDATE() - INTERVAL %s DAY ORDER BY fecha DESC LIMIT 50",
+            (dias,),
+        ))
+
     return [resumen_mensual, beneficio_por_categoria, ranking_productos,
-            beneficio_de_producto, ventas_por_dia, mermas_recientes]
+            beneficio_de_producto, ventas_por_dia, mermas_recientes, pedido_sugerido,
+            cambios_recientes]
 
 
 # ---------------------------------------------------------------------
@@ -163,6 +209,25 @@ _EXTRA_DEPENDIENTE = """- Esta persona tiene perfil de DEPENDIENTE: no tiene acc
 _CLAVES = {"google_genai": "google_api_key", "groq": "groq_api_key", "anthropic": "anthropic_api_key"}
 
 
+def _modelo(proveedor: str, nombre: str):
+    campo_api_key = _CLAVES.get(proveedor)
+    return init_chat_model(
+        nombre,
+        model_provider=proveedor,
+        max_tokens=4000,
+        max_retries=1,  # los reintentos los gestiona ModelRetryMiddleware
+        **({"api_key": getattr(settings, campo_api_key)} if campo_api_key else {}),
+    )
+
+
+def _reserva_disponible() -> bool:
+    p = settings.llm_reserva_provider
+    if not (p and settings.llm_reserva_model):
+        return False
+    clave = _CLAVES.get(p)
+    return clave is None or bool(getattr(settings, clave))
+
+
 def asistente_disponible() -> bool:
     clave = _CLAVES.get(settings.llm_provider)
     return clave is None or bool(getattr(settings, clave))
@@ -175,16 +240,16 @@ def _agente(rol: str):
         herramientas = _herramientas_comunes(rol)
         if rol == "admin":
             herramientas += _herramientas_admin()
-        campo_api_key = _CLAVES.get(settings.llm_provider)
-        modelo = init_chat_model(
-            settings.llm_model,
-            model_provider=settings.llm_provider,
-            max_tokens=4000,
-            **({"api_key": getattr(settings, campo_api_key)} if campo_api_key else {}),
-        )
+        # Si el proveedor está saturado (503) o se pasa la cuota (429), se
+        # reintenta una vez y, si hay modelo de reserva configurado, se usa.
+        middleware = [ModelRetryMiddleware(max_retries=1, initial_delay=2.0, on_failure="error")]
+        if _reserva_disponible():
+            middleware.insert(0, ModelFallbackMiddleware(
+                _modelo(settings.llm_reserva_provider, settings.llm_reserva_model)))
         _agentes[clave] = create_agent(
-            modelo,
+            _modelo(settings.llm_provider, settings.llm_model),
             tools=herramientas,
+            middleware=middleware,
             system_prompt=_PROMPT.format(
                 quien="el administrador (dueño del negocio)" if rol == "admin"
                 else "un dependiente de la tienda",

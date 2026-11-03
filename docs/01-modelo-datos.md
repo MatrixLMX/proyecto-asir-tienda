@@ -16,6 +16,8 @@ erDiagram
     PRODUCTOS   ||--o{ LINEAS_VENTA   : "se vende en"
     PRODUCTOS   ||--o{ MERMAS         : "se pierde en"
     LOTES       |o--o{ MERMAS         : "se retira de"
+    LINEAS_VENTA ||--o{ LOTES_CONSUMIDOS : "sale de"
+    LOTES       ||--o{ LOTES_CONSUMIDOS : "se gasta en"
 
     PRODUCTOS {
         int id PK
@@ -67,7 +69,12 @@ Las claves primarias van **en negrita** y las ajenas en _cursiva_.
 - **ventas** (**id**, fecha, metodo_pago, total, usuario)
 - **lineas_venta** (**id**, _venta_id_, _producto_id_, cantidad, precio_unitario, iva_porcentaje, coste_unitario)
 - **mermas** (**id**, _producto_id_, _lote_id_, cantidad, motivo, coste_unitario, fecha, usuario, notas)
+- **lotes_consumidos** (**id**, _linea_venta_id_, _lote_id_, cantidad)
+- **cierres_caja** (**id**, fecha, tickets, total_efectivo, total_tarjeta, total_bizum, fondo_inicial, efectivo_contado, diferencia, usuario, notas, creado_en)
+- **auditoria** (**id**, fecha, usuario, accion, tabla, registro_id, detalle)
 - **usuarios_app** (**id**, usuario, nombre, password_hash, rol, activo, creado_en)
+
+`cierres_caja` y `auditoria` no tienen claves ajenas a propósito: son un registro histórico y deben conservarse aunque se borre o cambie lo que describen.
 
 ## 1.3 Decisiones de diseño
 
@@ -80,6 +87,9 @@ Las claves primarias van **en negrita** y las ajenas en _cursiva_.
 | **Caducidades sin vigilar producto a producto** | Ver 1.4. |
 | **Categorías y proveedores nuevos** | Son tablas, no listas fijas: se añaden desde la web (Catálogo) sin tocar la BD. |
 | **Datos coherentes** | `CHECK` (cantidades > 0, precios ≥ 0), claves ajenas, y el stock solo lo cambian los triggers. |
+| **Equivocarse al cobrar** | La venta se anula entera (solo el administrador). Los triggers devuelven el stock **y la cantidad a sus lotes**, gracias a `lotes_consumidos`, que apunta de qué lote salió cada línea. |
+| **Cuadrar la caja** | `cierres_caja` guarda, por día, lo cobrado por cada forma de pago y el efectivo contado. La diferencia es una **columna calculada** (`efectivo_contado − fondo_inicial − total_efectivo`). |
+| **Saber quién cambió qué** | Tabla `auditoria`, rellenada por triggers. La web pasa el usuario en la variable de sesión `@usuario_app`; si el cambio se hace a mano en el servidor, se guarda el usuario de MariaDB (`CURRENT_USER()`). |
 
 ## 1.4 Control de caducidades automático
 
@@ -103,6 +113,10 @@ La idea es que **nadie tenga que revisar las fechas producto a producto**:
 | `trg_lv_after_delete`, `trg_ventas_before_delete` | Al anular una venta o una línea | Devuelve el stock y corrige el total |
 | `trg_lc_before_update`, `trg_lv_before_update` | Al intentar modificar una línea | Lo impide: las líneas se borran y se registran de nuevo, así queda rastro |
 | `trg_merma_before_insert`, `trg_merma_after_insert` | Al registrar una merma | Comprueba el stock y el lote, y lo descuenta |
+| `trg_lv_before_delete` | Al borrar una línea de venta | Devuelve la cantidad a los lotes de los que salió |
+| `trg_merma_auditoria`, `trg_productos_auditoria`, `trg_usuarios_alta`, `trg_usuarios_cambio` | Mermas, cambios de precio o de alta/baja, cambios de usuarios | Lo apuntan en `auditoria`. Las ventas anuladas y las compras borradas se apuntan en sus triggers `BEFORE DELETE` |
+
+Funciones auxiliares: `fmt_euros` y `fmt_cantidad` dan formato español a los textos de la auditoría (`1,20 €`, `0,5 kg`).
 
 > En MariaDB los borrados en cascada **no** disparan triggers. Por eso `ventas` y `compras` tienen su propio trigger `BEFORE DELETE`.
 
@@ -118,6 +132,9 @@ La idea es que **nadie tenga que revisar las fechas producto a producto**:
 | `v_beneficio_categoria` | admin | Beneficio y margen por categoría |
 | `v_beneficio_mensual` | admin | Beneficio neto del mes (descontadas las mermas) **comparado con la estimación antigua del 15 %** |
 | `v_ventas_diarias` | admin | Tickets, facturación y ticket medio por día |
+| `v_lineas_ticket` | todos | Líneas de un ticket **sin costes** (consultar e imprimir tickets) |
+| `v_caja_diaria` | todos | Lo cobrado cada día en efectivo, tarjeta y Bizum (cierre de caja) |
+| `v_productos_parados` | todos | Productos con stock y días que llevan sin venderse |
 
 ## 1.7 Perfiles y permisos
 
@@ -126,7 +143,7 @@ Los permisos se controlan **en MariaDB** con roles. La web se conecta con un usu
 | Rol | Usuario BD | Puede |
 |---|---|---|
 | `rol_admin` | `tienda_admin` | Leer y escribir todos los datos (no cambiar la estructura) |
-| `rol_dependiente` | `tienda_dependiente` | Consultar `v_stock`, `v_alertas_stock` y `v_caducidades`; registrar ventas (solo producto y cantidad, el precio lo pone el trigger) y mermas |
-| `rol_auth` | `tienda_auth` | Solo leer `usuarios_app`, para el login |
+| `rol_dependiente` | `tienda_dependiente` | Consultar `v_stock`, `v_alertas_stock`, `v_caducidades`, `v_lineas_ticket`, `v_caja_diaria` y `v_productos_parados`; registrar ventas (solo producto y cantidad, el precio lo pone el trigger), mermas y el cierre de caja. No puede anular ventas |
+| `rol_auth` | `tienda_auth` | Leer `usuarios_app` para el login y cambiar **solo** la columna `password_hash` (cambio de contraseña) |
 
 Las contraseñas de la web se guardan con **bcrypt**, nunca en claro.

@@ -77,6 +77,24 @@ Abre **http://localhost:5173**.
 
 ---
 
+## Pruebas automáticas
+
+Con Docker en marcha:
+
+```powershell
+docker compose exec backend pip install -r requirements-dev.txt
+docker compose exec backend python -m pytest -q tests
+```
+
+Prueban la API contra la base de datos de ejemplo: login y bloqueo por intentos, permisos de cada perfil (también a nivel de MariaDB), ventas sin stock, anulación con devolución de stock y lotes, mermas, cierre de caja, edición de productos, compras, usuarios y auditoría. Dejan la base de datos como estaba.
+
+Si cambias algún fichero de `sql/`, recrea la base de datos (se pierden los datos de prueba):
+
+```powershell
+docker compose down -v
+docker compose up -d --build
+```
+
 ## Qué probar
 
 1. Entra como **dependiente**. No verás Compras, Catálogo ni Beneficios. Pregúntale al asistente "¿cuánto ganamos este mes?": te dirá que no tiene acceso.
@@ -86,4 +104,9 @@ Abre **http://localhost:5173**.
 5. Entra como **admin**. En **Beneficios** compara el beneficio real con la estimación del 15 %.
 6. **Compras**: registra una compra de yogures sin fecha. La caducidad se calcula sola con la vida útil.
 7. **Catálogo**: añade una categoría y un producto nuevos.
-8. Asistente (admin): "¿qué 5 productos me dejan menos margen?", "¿qué tengo que pedir a Dulcesol?", "¿cuánto he perdido en mermas este mes?".
+8. Asistente (admin): "¿qué 5 productos me dejan menos margen?", "¿qué tengo que pedir a Dulcesol?", "¿cuánto he perdido en mermas este mes?", "¿quién ha cambiado precios esta semana?".
+9. **Ventas y caja**: abre un ticket, imprímelo y (como admin) anúlalo. El stock vuelve. Después cierra la caja del día contando el efectivo.
+10. **Stock**: registra una merma (por ejemplo, un producto roto) con el botón de la derecha.
+11. **Compras → Qué pedir**: pulsa "Registrar esta compra" y la compra se rellena sola con lo que falta.
+12. **Usuarios**: crea un dependiente nuevo, entra con él y cambia su contraseña (icono de la llave). En **Registro de cambios** aparece todo.
+13. En **Vender**, usa el teclado: **F4** busca, **F2** cobra, **Intro** confirma el cobro.

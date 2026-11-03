@@ -1,18 +1,22 @@
-import { useEffect, useState, type ComponentType } from "react";
+import { Suspense, lazy, useEffect, useState, type ComponentType, type FormEvent } from "react";
 import {
-  BarChart3, CalendarClock, LayoutDashboard, LogOut, MoreHorizontal, Package, ShoppingCart, Store, Tags, Truck, X,
+  BarChart3, CalendarClock, KeyRound, LayoutDashboard, LogOut, MoreHorizontal, Package, Receipt, ShoppingCart, Store, Tags, Truck, Users, X,
 } from "lucide-react";
-import { api, sesion, type AlertaStock, type Caducidad, type Usuario } from "./api";
+import { api, post, sesion, type AlertaStock, type Caducidad, type Usuario } from "./api";
 import Asistente from "./Asistente";
-import { ProveedorAvisos, SelectorTema, useDatos } from "./ui";
+import { tienda, type DatosTienda } from "./ticket";
+import { Modal, ProveedorAvisos, SelectorTema, useAviso, useDatos } from "./ui";
 import Login from "./pages/Login";
-import Inicio from "./pages/Inicio";
-import Vender from "./pages/Vender";
-import Stock from "./pages/Stock";
-import Caducidades from "./pages/Caducidades";
-import Compras from "./pages/Compras";
-import Catalogo from "./pages/Catalogo";
-import Informes from "./pages/Informes";
+// Cada pantalla se descarga cuando se abre: la web carga antes en el móvil
+const Inicio = lazy(() => import("./pages/Inicio"));
+const Vender = lazy(() => import("./pages/Vender"));
+const Stock = lazy(() => import("./pages/Stock"));
+const Caducidades = lazy(() => import("./pages/Caducidades"));
+const Compras = lazy(() => import("./pages/Compras"));
+const Catalogo = lazy(() => import("./pages/Catalogo"));
+const Informes = lazy(() => import("./pages/Informes"));
+const Ventas = lazy(() => import("./pages/Ventas"));
+const Usuarios = lazy(() => import("./pages/Usuarios"));
 
 export interface PropsPagina { usuario: Usuario; ir: (seccion: string) => void }
 
@@ -30,9 +34,11 @@ const SECCIONES: Seccion[] = [
   { id: "vender", nombre: "Vender", icono: ShoppingCart, pagina: Vender, movil: true },
   { id: "stock", nombre: "Stock", icono: Package, pagina: Stock, movil: true },
   { id: "caducidades", nombre: "Caducidades", icono: CalendarClock, pagina: Caducidades, movil: true },
+  { id: "ventas", nombre: "Ventas y caja", icono: Receipt, pagina: Ventas },
   { id: "compras", nombre: "Compras", icono: Truck, pagina: Compras, soloAdmin: true },
   { id: "catalogo", nombre: "Catálogo", icono: Tags, pagina: Catalogo, soloAdmin: true },
   { id: "informes", nombre: "Beneficios", icono: BarChart3, pagina: Informes, soloAdmin: true },
+  { id: "usuarios", nombre: "Usuarios", icono: Users, pagina: Usuarios, soloAdmin: true },
 ];
 
 const leerSeccion = () => window.location.hash.slice(1) || "inicio";
@@ -48,6 +54,16 @@ export default function App() {
 function Aplicacion() {
   const [usuario, setUsuario] = useState<Usuario | null>(null);
   const [cargando, setCargando] = useState(!!sesion.token());
+  const [nombreTienda, setNombreTienda] = useState(tienda.nombre);
+
+  // Nombre y datos fiscales de la tienda (del .env del servidor)
+  useEffect(() => {
+    api<DatosTienda>("/tienda").then((d) => {
+      Object.assign(tienda, d);
+      setNombreTienda(d.nombre);
+      document.title = d.nombre;
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!sesion.token()) return;
@@ -55,13 +71,14 @@ function Aplicacion() {
   }, []);
 
   if (cargando) return <div className="grid min-h-screen place-items-center"><Store className="size-8 animate-pulse text-marca-500" /></div>;
-  if (!usuario) return <Login alEntrar={setUsuario} />;
-  return <Panel usuario={usuario} alSalir={() => { sesion.cerrar(); setUsuario(null); }} />;
+  if (!usuario) return <Login alEntrar={setUsuario} nombreTienda={nombreTienda} />;
+  return <Panel usuario={usuario} nombreTienda={nombreTienda} alSalir={() => { sesion.cerrar(); setUsuario(null); }} />;
 }
 
-function Panel({ usuario, alSalir }: { usuario: Usuario; alSalir: () => void }) {
+function Panel({ usuario, nombreTienda, alSalir }: { usuario: Usuario; nombreTienda: string; alSalir: () => void }) {
   const [actual, setActual] = useState(leerSeccion);
   const [masAbierto, setMasAbierto] = useState(false);
+  const [cambiandoClave, setCambiandoClave] = useState(false);
   const caducidades = useDatos<Caducidad[]>("/alertas/caducidades");
   const stockBajo = useDatos<AlertaStock[]>("/alertas/stock");
 
@@ -93,9 +110,9 @@ function Panel({ usuario, alSalir }: { usuario: Usuario; alSalir: () => void }) 
 
   const navegacion = (
     <nav className="flex flex-1 flex-col gap-1" aria-label="Secciones">
-      {visibles.map(({ id, nombre, icono: Icono }, i) => (
+      {visibles.map(({ id, nombre, icono: Icono, soloAdmin }, i) => (
         <div key={id}>
-          {i === 4 && <p className="mb-1 mt-5 px-3 text-[11px] font-semibold uppercase tracking-wider text-tenue">Administración</p>}
+          {soloAdmin && !visibles[i - 1]?.soloAdmin && <p className="mb-1 mt-5 px-3 text-[11px] font-semibold uppercase tracking-wider text-tenue">Administración</p>}
           <button
             onClick={() => ir(id)}
             aria-current={seccion.id === id ? "page" : undefined}
@@ -123,6 +140,9 @@ function Panel({ usuario, alSalir }: { usuario: Usuario; alSalir: () => void }) 
           <p className="truncate text-sm font-semibold">{usuario.nombre}</p>
           <p className="text-xs capitalize text-tenue">{usuario.rol}</p>
         </div>
+        <button title="Cambiar mi contraseña" aria-label="Cambiar mi contraseña" onClick={() => setCambiandoClave(true)} className="rounded-lg p-1.5 text-tenue hover:bg-superficie hover:text-texto">
+          <KeyRound className="size-[18px]" />
+        </button>
         <button title="Cerrar sesión" aria-label="Cerrar sesión" onClick={alSalir} className="rounded-lg p-1.5 text-tenue hover:bg-superficie hover:text-rose-500">
           <LogOut className="size-[18px]" />
         </button>
@@ -136,7 +156,7 @@ function Panel({ usuario, alSalir }: { usuario: Usuario; alSalir: () => void }) 
         <Store className="size-5" />
       </div>
       <div>
-        <p className="text-base font-bold leading-tight tracking-tight">Mi Tienda</p>
+        <p className="text-base font-bold leading-tight tracking-tight">{nombreTienda}</p>
         <p className="text-xs text-tenue">Gestión</p>
       </div>
     </div>
@@ -155,12 +175,14 @@ function Panel({ usuario, alSalir }: { usuario: Usuario; alSalir: () => void }) 
 
       {/* Cabecera (móvil) */}
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-borde bg-superficie/85 px-4 py-3 backdrop-blur-lg lg:hidden">
-        <div className="flex items-center gap-2 font-bold"><Store className="size-5 text-marca-500" /> Mi Tienda</div>
+        <div className="flex items-center gap-2 font-bold"><Store className="size-5 text-marca-500" /> {nombreTienda}</div>
         <SelectorTema compacto />
       </header>
 
       <main key={seccion.id} className="animar-entrada mx-auto w-full max-w-7xl flex-1 p-4 pb-28 sm:p-8 lg:pb-8">
-        <Pagina usuario={usuario} ir={ir} />
+        <Suspense fallback={<div className="grid h-64 place-items-center"><Store className="size-7 animate-pulse text-marca-500" /></div>}>
+          <Pagina usuario={usuario} ir={ir} />
+        </Suspense>
       </main>
 
       {/* Barra inferior (móvil) */}
@@ -178,7 +200,7 @@ function Panel({ usuario, alSalir }: { usuario: Usuario; alSalir: () => void }) 
       </nav>
 
       {masAbierto && (
-        <div className="fixed inset-0 z-40 bg-slate-950/50 backdrop-blur-sm lg:hidden" onClick={() => setMasAbierto(false)}>
+        <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-sm lg:hidden" onClick={() => setMasAbierto(false)}>
           <div className="animar-modal absolute inset-x-0 bottom-0 rounded-t-3xl border-t border-borde bg-superficie p-5 pb-8" onClick={(e) => e.stopPropagation()}>
             <div className="mb-4 flex items-center justify-between">
               <p className="font-semibold">Menú</p>
@@ -197,6 +219,42 @@ function Panel({ usuario, alSalir }: { usuario: Usuario; alSalir: () => void }) 
       )}
 
       <Asistente disponible={!!usuario.asistente} rol={usuario.rol} />
+      <CambiarClave abierto={cambiandoClave} alCerrar={() => setCambiandoClave(false)} />
     </div>
+  );
+}
+
+function CambiarClave({ abierto, alCerrar }: { abierto: boolean; alCerrar: () => void }) {
+  const avisar = useAviso();
+  const [actual, setActual] = useState("");
+  const [nueva, setNueva] = useState("");
+  const [repetida, setRepetida] = useState("");
+  const distintas = repetida.length > 0 && nueva !== repetida;
+
+  async function guardar(e: FormEvent) {
+    e.preventDefault();
+    try {
+      await post("/auth/cambiar-password", { actual, nueva });
+      avisar("ok", "Contraseña cambiada");
+      setActual(""); setNueva(""); setRepetida("");
+      alCerrar();
+    } catch (err) {
+      avisar("error", (err as Error).message);
+    }
+  }
+
+  return (
+    <Modal abierto={abierto} alCerrar={alCerrar} titulo="Cambiar mi contraseña">
+      <form onSubmit={guardar} className="space-y-4">
+        <div><label className="etiqueta" htmlFor="c-actual">Contraseña actual</label><input id="c-actual" className="campo" type="password" autoComplete="current-password" required autoFocus value={actual} onChange={(e) => setActual(e.target.value)} /></div>
+        <div><label className="etiqueta" htmlFor="c-nueva">Contraseña nueva</label><input id="c-nueva" className="campo" type="password" autoComplete="new-password" required minLength={8} value={nueva} onChange={(e) => setNueva(e.target.value)} placeholder="mínimo 8 caracteres" /></div>
+        <div>
+          <label className="etiqueta" htmlFor="c-repetida">Repite la nueva</label>
+          <input id="c-repetida" className="campo" type="password" autoComplete="new-password" required value={repetida} onChange={(e) => setRepetida(e.target.value)} aria-invalid={distintas} />
+          {distintas && <p className="mt-1 text-xs text-rose-600 dark:text-rose-400">No coinciden</p>}
+        </div>
+        <div className="flex justify-end gap-2 pt-2"><button type="button" className="boton-sec" onClick={alCerrar}>Cancelar</button><button className="boton" disabled={distintas || nueva.length < 8}>Cambiar</button></div>
+      </form>
+    </Modal>
   );
 }

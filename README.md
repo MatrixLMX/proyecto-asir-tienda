@@ -9,7 +9,8 @@ Este proyecto monta un servidor **Debian 13** con **MariaDB** para una tienda de
 - **Calcula el beneficio real** (precio sin IVA − coste de compra) por producto, categoría y mes, y lo compara con la estimación del 15 % que se usaba antes.
 - **Controla las caducidades por lotes**, sin revisar producto a producto.
 - Tiene **dos perfiles**: el administrador lo ve todo; el dependiente vende y consulta stock, pero no ve costes ni beneficios.
-- Está **securizado** (SSH con claves, UFW, Fail2ban, HTTPS) y hace **copias de seguridad diarias** con restauración comprobada.
+- Lleva el **día a día de la caja**: historial de tickets, anulaciones, ticket impreso, cierre de caja con descuadre, y un **registro de cambios** (quién cambió un precio, anuló una venta...).
+- Está **securizado** (SSH con claves, UFW, Fail2ban también para el login web, HTTPS con CA propia), hace **copias de seguridad diarias** con restauración comprobada y se **monitoriza** solo.
 - Incluye una **web moderna** con un **asistente virtual** (LangChain + LangGraph + Gemini) al que se le pregunta en lenguaje natural: _"¿qué caduca esta semana?"_ o _"¿qué productos me dejan menos margen?"_.
 
 ## Arquitectura
@@ -41,12 +42,12 @@ sql/                 Base de datos (se ejecuta en este orden)
   06_datos_base.sql    IVA, categorías y proveedores reales
   07_datos_ejemplo.sql datos ficticios para pruebas
 scripts/
-  servidor/            instalación y securización del servidor (01, 02, 03)
+  servidor/            instalación, securización, web y monitorización (01 a 04)
   backup/              copia diaria, rotación, copia externa y restauración
   local/               cargar la BD en un MariaDB de Windows
 config/              ficheros de configuración (SSH, Fail2ban, MariaDB, Apache, systemd, red)
 app/
-  backend/             API en Python (FastAPI) + asistente (LangChain / LangGraph)
+  backend/             API en Python (FastAPI) + asistente (LangChain / LangGraph) + pruebas (pytest)
   frontend/            web en React + Tailwind
 docs/                documentación
 docker-compose.yml   entorno completo para probar en local
@@ -56,7 +57,9 @@ docker-compose.yml   entorno completo para probar en local
 
 1. [Diseño de la base de datos](docs/01-modelo-datos.md): modelo E-R, modelo relacional, triggers, vistas y permisos.
 2. [Guía paso a paso del servidor](docs/02-guia-servidor.md): VirtualBox, Debian 13, securización, MariaDB, copias de seguridad y web.
-3. [Probar en local sin máquina virtual](docs/03-probar-en-local.md): con Docker Desktop o con MariaDB en Windows.
+3. [Probar en local sin máquina virtual](docs/03-probar-en-local.md): con Docker Desktop o con MariaDB en Windows, y pruebas automáticas.
+4. [Manual de usuario](docs/04-manual-usuario.md): cómo se usa la web en la tienda.
+5. [Plan de recuperación ante desastres](docs/05-plan-recuperacion.md): qué hacer si falla el servidor.
 
 ## Prueba rápida
 

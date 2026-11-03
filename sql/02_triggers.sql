@@ -22,10 +22,23 @@ USE tienda;
 DELIMITER //
 
 -- ---------------------------------------------------------------------
+--  Formato español para los textos de la auditoría: 1,5 kg / 3 u / 1,20 €
+-- ---------------------------------------------------------------------
+CREATE FUNCTION fmt_euros(p DECIMAL(12,2)) RETURNS VARCHAR(20) DETERMINISTIC
+  RETURN CONCAT(FORMAT(p, 2, 'es_ES'), ' €')//
+
+CREATE FUNCTION fmt_cantidad(p DECIMAL(10,3)) RETURNS VARCHAR(20) DETERMINISTIC
+  RETURN TRIM(TRAILING ',' FROM TRIM(TRAILING '0' FROM FORMAT(p, 3, 'es_ES')))//
+
+-- ---------------------------------------------------------------------
 --  Procedimiento auxiliar: descuenta una cantidad de los lotes de un
 --  producto, del que caduca antes al que caduca después.
 -- ---------------------------------------------------------------------
-CREATE PROCEDURE consumir_lotes(IN p_producto INT UNSIGNED, IN p_cantidad DECIMAL(10,3))
+--  Si viene de una línea de venta (p_linea), apunta de qué lote salió
+--  cada parte, para poder devolverlo si la venta se anula.
+-- ---------------------------------------------------------------------
+CREATE PROCEDURE consumir_lotes(IN p_producto INT UNSIGNED, IN p_cantidad DECIMAL(10,3),
+                                IN p_linea INT UNSIGNED)
 BEGIN
   DECLARE v_pendiente DECIMAL(10,3) DEFAULT p_cantidad;
   DECLARE v_lote      INT UNSIGNED;
@@ -46,9 +59,15 @@ BEGIN
 
     IF v_restante >= v_pendiente THEN
       UPDATE lotes SET cantidad_restante = cantidad_restante - v_pendiente WHERE id = v_lote;
+      IF p_linea IS NOT NULL THEN
+        INSERT INTO lotes_consumidos (linea_venta_id, lote_id, cantidad) VALUES (p_linea, v_lote, v_pendiente);
+      END IF;
       SET v_pendiente = 0;
     ELSE
       UPDATE lotes SET cantidad_restante = 0 WHERE id = v_lote;
+      IF p_linea IS NOT NULL THEN
+        INSERT INTO lotes_consumidos (linea_venta_id, lote_id, cantidad) VALUES (p_linea, v_lote, v_restante);
+      END IF;
       SET v_pendiente = v_pendiente - v_restante;
     END IF;
   END LOOP;
@@ -140,6 +159,11 @@ BEGIN
 
   DELETE FROM lotes
    WHERE linea_compra_id IN (SELECT id FROM lineas_compra WHERE compra_id = OLD.id);
+
+  INSERT INTO auditoria (usuario, accion, tabla, registro_id, detalle)
+  VALUES (COALESCE(@usuario_app, CURRENT_USER()), 'borrar_compra', 'compras', OLD.id,
+          CONCAT('Compra nº ', OLD.id, ' del ', DATE_FORMAT(OLD.fecha, '%d/%m/%Y'), ': ', fmt_euros(OLD.total_sin_iva),
+                 ' sin IVA', IF(OLD.numero_factura IS NULL, '', CONCAT(', factura ', OLD.numero_factura))));
 END//
 
 -- =====================================================================
@@ -191,7 +215,7 @@ AFTER INSERT ON lineas_venta
 FOR EACH ROW
 BEGIN
   UPDATE productos SET stock_actual = stock_actual - NEW.cantidad WHERE id = NEW.producto_id;
-  CALL consumir_lotes(NEW.producto_id, NEW.cantidad);
+  CALL consumir_lotes(NEW.producto_id, NEW.cantidad, NEW.id);
   UPDATE ventas
      SET total = total + ROUND(NEW.cantidad * NEW.precio_unitario, 2)
    WHERE id = NEW.venta_id;
@@ -202,6 +226,16 @@ BEFORE UPDATE ON lineas_venta
 FOR EACH ROW
   SIGNAL SQLSTATE '45000'
     SET MESSAGE_TEXT = 'Las lineas de venta no se modifican: borra la linea y registrala de nuevo'//
+
+CREATE TRIGGER trg_lv_before_delete
+BEFORE DELETE ON lineas_venta
+FOR EACH ROW
+  -- Devuelve la cantidad a los lotes de los que salió
+  UPDATE lotes l
+    JOIN (SELECT lote_id, SUM(cantidad) AS cantidad
+            FROM lotes_consumidos WHERE linea_venta_id = OLD.id
+           GROUP BY lote_id) c ON c.lote_id = l.id
+     SET l.cantidad_restante = l.cantidad_restante + c.cantidad//
 
 CREATE TRIGGER trg_lv_after_delete
 AFTER DELETE ON lineas_venta
@@ -222,6 +256,21 @@ BEGIN
             FROM lineas_venta WHERE venta_id = OLD.id
            GROUP BY producto_id) lv ON lv.producto_id = p.id
      SET p.stock_actual = p.stock_actual + lv.cantidad;
+
+  -- El borrado en cascada de las líneas no dispara sus triggers: los
+  -- lotes se devuelven aquí
+  UPDATE lotes l
+    JOIN (SELECT c.lote_id, SUM(c.cantidad) AS cantidad
+            FROM lotes_consumidos c
+            JOIN lineas_venta lv ON lv.id = c.linea_venta_id
+           WHERE lv.venta_id = OLD.id
+           GROUP BY c.lote_id) c ON c.lote_id = l.id
+     SET l.cantidad_restante = l.cantidad_restante + c.cantidad;
+
+  INSERT INTO auditoria (usuario, accion, tabla, registro_id, detalle)
+  VALUES (COALESCE(@usuario_app, CURRENT_USER()), 'anular_venta', 'ventas', OLD.id,
+          CONCAT('Ticket nº ', OLD.id, ' del ', DATE_FORMAT(OLD.fecha, '%d/%m/%Y %H:%i'), ': ',
+                 fmt_euros(OLD.total), ' en ', OLD.metodo_pago, ', vendido por ', COALESCE(OLD.usuario, '?')));
 END//
 
 -- =====================================================================
@@ -261,7 +310,56 @@ BEGIN
     UPDATE lotes SET cantidad_restante = GREATEST(cantidad_restante - NEW.cantidad, 0)
      WHERE id = NEW.lote_id;
   ELSE
-    CALL consumir_lotes(NEW.producto_id, NEW.cantidad);
+    CALL consumir_lotes(NEW.producto_id, NEW.cantidad, NULL);
+  END IF;
+END//
+
+-- =====================================================================
+--  AUDITORÍA de cambios delicados
+-- =====================================================================
+CREATE TRIGGER trg_merma_auditoria
+AFTER INSERT ON mermas
+FOR EACH ROW
+  INSERT INTO auditoria (usuario, accion, tabla, registro_id, detalle)
+  SELECT COALESCE(@usuario_app, CURRENT_USER()), 'merma', 'mermas', NEW.id,
+         CONCAT(fmt_cantidad(NEW.cantidad), IF(p.unidad_medida = 'kg', ' kg', ' u'), ' de ', p.nombre,
+                ' (', REPLACE(NEW.motivo, '_', ' '), ')',
+                IF(NEW.notas IS NULL, '', CONCAT(': ', NEW.notas)))
+    FROM productos p WHERE p.id = NEW.producto_id//
+
+CREATE TRIGGER trg_productos_auditoria
+AFTER UPDATE ON productos
+FOR EACH ROW
+BEGIN
+  IF OLD.precio_venta <> NEW.precio_venta THEN
+    INSERT INTO auditoria (usuario, accion, tabla, registro_id, detalle)
+    VALUES (COALESCE(@usuario_app, CURRENT_USER()), 'cambiar_precio', 'productos', NEW.id,
+            CONCAT(NEW.nombre, ': ', fmt_euros(OLD.precio_venta), ' → ', fmt_euros(NEW.precio_venta)));
+  END IF;
+  IF OLD.activo <> NEW.activo THEN
+    INSERT INTO auditoria (usuario, accion, tabla, registro_id, detalle)
+    VALUES (COALESCE(@usuario_app, CURRENT_USER()), IF(NEW.activo, 'alta_producto', 'baja_producto'), 'productos', NEW.id, NEW.nombre);
+  END IF;
+END//
+
+CREATE TRIGGER trg_usuarios_alta
+AFTER INSERT ON usuarios_app
+FOR EACH ROW
+  INSERT INTO auditoria (usuario, accion, tabla, registro_id, detalle)
+  VALUES (COALESCE(@usuario_app, CURRENT_USER()), 'crear_usuario', 'usuarios_app', NEW.id, CONCAT(NEW.usuario, ' (', NEW.rol, ')'))//
+
+CREATE TRIGGER trg_usuarios_cambio
+AFTER UPDATE ON usuarios_app
+FOR EACH ROW
+BEGIN
+  IF OLD.password_hash <> NEW.password_hash THEN
+    INSERT INTO auditoria (usuario, accion, tabla, registro_id, detalle)
+    VALUES (COALESCE(@usuario_app, CURRENT_USER()), 'cambiar_contraseña', 'usuarios_app', NEW.id, NEW.usuario);
+  END IF;
+  IF OLD.rol <> NEW.rol OR OLD.activo <> NEW.activo THEN
+    INSERT INTO auditoria (usuario, accion, tabla, registro_id, detalle)
+    VALUES (COALESCE(@usuario_app, CURRENT_USER()), 'modificar_usuario', 'usuarios_app', NEW.id,
+            CONCAT(NEW.usuario, ': perfil ', NEW.rol, IF(NEW.activo, ', activo', ', desactivado')));
   END IF;
 END//
 

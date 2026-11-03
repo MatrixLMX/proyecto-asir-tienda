@@ -1,9 +1,11 @@
-import { useMemo, useRef, useState } from "react";
-import { Banknote, CreditCard, Minus, PackageSearch, Plus, ScanBarcode, Search, ShoppingBag, Smartphone, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Banknote, CreditCard, Minus, PackageSearch, Plus, Printer, ScanBarcode, Search, ShoppingBag, Smartphone, Trash2, X } from "lucide-react";
 import { cantidad, euros, post, type ProductoStock } from "../api";
+import { imprimirTicket } from "../ticket";
 import { Cabecera, Esqueleto, Modal, Vacio, emitirCambio, useAviso, useDatos } from "../ui";
 
 interface Linea { producto: ProductoStock; cantidad: number }
+interface UltimaVenta { id: number; total: number; efectivo?: { entregado: number; cambio: number } }
 type Pago = "efectivo" | "tarjeta" | "bizum";
 
 const PAGOS = [
@@ -25,6 +27,7 @@ export default function Vender() {
   const [carrito, setCarrito] = useState<Linea[]>([]);
   const [cobrando, setCobrando] = useState(false);
   const [ticketMovil, setTicketMovil] = useState(false);
+  const [ultima, setUltima] = useState<UltimaVenta | null>(null);
 
   const categorias = useMemo(() => [...new Set((productos ?? []).map((p) => p.categoria))].sort(), [productos]);
   const filtrados = useMemo(() => {
@@ -60,12 +63,26 @@ export default function Vender() {
     if (elegido) { añadir(elegido); setBusqueda(""); }
   }
 
-  async function confirmarVenta(pago: Pago, cambio: number | null) {
+  // Atajos de teclado: F2 cobrar, F4 buscar
+  useEffect(() => {
+    const tecla = (e: KeyboardEvent) => {
+      if (e.key === "F2" && carrito.length && !cobrando) { e.preventDefault(); setCobrando(true); }
+      if (e.key === "F4") { e.preventDefault(); buscador.current?.focus(); buscador.current?.select(); }
+    };
+    window.addEventListener("keydown", tecla);
+    return () => window.removeEventListener("keydown", tecla);
+  }, [carrito.length, cobrando]);
+
+  const imprimir = (v: UltimaVenta) => imprimirTicket(v.id, v.efectivo).catch((e) => avisar("error", e.message));
+
+  async function confirmarVenta(pago: Pago, entregado: number | null) {
     try {
       const r = await post<{ id: number; total: number }>("/ventas", {
         metodo_pago: pago,
         lineas: carrito.map((l) => ({ producto_id: l.producto.id, cantidad: l.cantidad })),
       });
+      const cambio = entregado != null ? Math.round((entregado - r.total) * 100) / 100 : null;
+      setUltima({ id: r.id, total: r.total, ...(entregado != null ? { efectivo: { entregado, cambio: cambio ?? 0 } } : {}) });
       avisar("ok", `Venta nº ${r.id}: ${euros(r.total)}${cambio ? ` · cambio ${euros(cambio)}` : ""}`);
       setCarrito([]);
       setCobrando(false);
@@ -79,12 +96,17 @@ export default function Vender() {
   }
 
   const ticket = (
-    <Ticket carrito={carrito} total={total} cambiar={cambiar} vaciar={() => setCarrito([])} cobrar={() => setCobrando(true)} />
+    <Ticket carrito={carrito} total={total} cambiar={cambiar} vaciar={() => setCarrito([])} cobrar={() => setCobrando(true)}
+      ultima={ultima} imprimir={imprimir} />
   );
 
   return (
     <>
-      <Cabecera titulo="Vender" subtitulo="Toca un producto o escanea su código de barras" />
+      <Cabecera titulo="Vender" subtitulo="Toca un producto o escanea su código de barras">
+        <p className="hidden gap-3 text-xs text-tenue lg:flex">
+          <span><kbd className="tecla">F4</kbd> buscar</span><span><kbd className="tecla">F2</kbd> cobrar</span><span><kbd className="tecla">Esc</kbd> cerrar</span>
+        </p>
+      </Cabecera>
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
         <div className="min-w-0">
           <div className="relative mb-3">
@@ -176,8 +198,9 @@ export default function Vender() {
   );
 }
 
-function Ticket({ carrito, total, cambiar, vaciar, cobrar }: {
+function Ticket({ carrito, total, cambiar, vaciar, cobrar, ultima, imprimir }: {
   carrito: Linea[]; total: number; cambiar: (id: number, n: number) => void; vaciar: () => void; cobrar: () => void;
+  ultima: UltimaVenta | null; imprimir: (v: UltimaVenta) => void;
 }) {
   return (
     <div className="flex flex-col">
@@ -228,13 +251,20 @@ function Ticket({ carrito, total, cambiar, vaciar, cobrar }: {
         <span className="text-sm text-suave">Total</span>
         <span className="text-3xl font-bold tracking-tight tabular-nums">{euros(total)}</span>
       </div>
-      <button className="boton w-full py-3.5 text-base" disabled={!carrito.length} onClick={cobrar}>Cobrar</button>
+      <button className="boton w-full py-3.5 text-base" disabled={!carrito.length} onClick={cobrar}>
+        Cobrar <kbd className="tecla hidden border-white/30 bg-white/15 text-white lg:inline">F2</kbd>
+      </button>
+      {ultima && !carrito.length && (
+        <button className="boton-sec mt-2 w-full" onClick={() => imprimir(ultima)}>
+          <Printer className="size-4" /> Imprimir ticket nº {ultima.id} ({euros(ultima.total)})
+        </button>
+      )}
     </div>
   );
 }
 
 function Cobro({ abierto, total, alCerrar, alConfirmar }: {
-  abierto: boolean; total: number; alCerrar: () => void; alConfirmar: (pago: Pago, cambio: number | null) => Promise<void>;
+  abierto: boolean; total: number; alCerrar: () => void; alConfirmar: (pago: Pago, entregado: number | null) => Promise<void>;
 }) {
   const [pago, setPago] = useState<Pago>("efectivo");
   const [entregado, setEntregado] = useState("");
@@ -243,9 +273,11 @@ function Cobro({ abierto, total, alCerrar, alConfirmar }: {
   const cambio = pago === "efectivo" && recibido ? Math.round((recibido - total) * 100) / 100 : null;
   const falta = cambio != null && cambio < 0;
 
-  async function confirmar() {
+  async function confirmar(e?: FormEvent) {
+    e?.preventDefault();
+    if (enviando || falta) return;
     setEnviando(true);
-    await alConfirmar(pago, cambio && cambio > 0 ? cambio : null);
+    await alConfirmar(pago, pago === "efectivo" && recibido ? recibido : null);
     setEnviando(false);
     setEntregado("");
   }
@@ -272,7 +304,9 @@ function Cobro({ abierto, total, alCerrar, alConfirmar }: {
       {pago === "efectivo" && (
         <div className="mb-5">
           <label className="etiqueta" htmlFor="entregado">Entregado por el cliente</label>
-          <input id="entregado" className="campo mb-2 text-lg" inputMode="decimal" placeholder="0,00" value={entregado} onChange={(e) => setEntregado(e.target.value)} />
+          <form onSubmit={confirmar}>
+            <input id="entregado" className="campo mb-2 text-lg" inputMode="decimal" placeholder="0,00 (Intro para cobrar)" autoFocus value={entregado} onChange={(e) => setEntregado(e.target.value)} />
+          </form>
           <div className="flex flex-wrap gap-2">
             <button className="boton-sec px-3 py-1.5" onClick={() => setEntregado(total.toFixed(2))}>Exacto</button>
             {BILLETES.filter((b) => b >= total).map((b) => (
@@ -286,7 +320,7 @@ function Cobro({ abierto, total, alCerrar, alConfirmar }: {
           )}
         </div>
       )}
-      <button className="boton w-full py-3.5 text-base" disabled={enviando || falta} onClick={confirmar}>
+      <button className="boton w-full py-3.5 text-base" disabled={enviando || falta} onClick={() => confirmar()} autoFocus={pago !== "efectivo"}>
         Confirmar venta
       </button>
     </Modal>

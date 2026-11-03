@@ -61,6 +61,9 @@ body {
 /* En la capa "components" para que las utilidades (w-20, px-3...) puedan
    sobrescribirlas */
 @layer components {
+  .tecla {
+    @apply inline-block rounded-md border border-borde bg-superficie-2 px-1.5 py-px font-sans text-[11px] font-semibold text-suave;
+  }
   .tarjeta {
     @apply rounded-2xl border border-borde bg-superficie shadow-sm shadow-black/[0.03];
   }

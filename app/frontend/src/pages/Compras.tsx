@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { CalendarClock, Plus, Trash2, Truck } from "lucide-react";
-import { cantidad, euros, post } from "../api";
-import { Cabecera, emitirCambio, useAviso, useDatos } from "../ui";
+import { CalendarClock, ClipboardList, Download, PackageCheck, Plus, Trash2, Truck } from "lucide-react";
+import { borrar, cantidad, descargarCsv, euros, fecha, fechaHora, post } from "../api";
+import { Cabecera, Confirmar, Esqueleto, Modal, Pestañas, Vacio, emitirCambio, useAviso, useDatos } from "../ui";
 
 export interface ProductoAdmin {
   id: number;
@@ -19,21 +19,51 @@ export interface ProductoAdmin {
   stock_minimo: number;
   controla_caducidad: number;
   vida_util_dias: number | null;
+  dias_aviso_caducidad: number;
   activo: number;
 }
 interface Proveedor { id: number; nombre: string }
 interface Linea { clave: number; producto_id: number; cantidad: number; coste_unitario: number; fecha_caducidad: string }
 
+interface Sugerencia {
+  id: number; producto: string; proveedor: string | null; proveedor_id: number | null; unidad_medida: string;
+  stock_actual: number; stock_minimo: number; cantidad_sugerida: number; coste_medio: number; coste_estimado: number;
+}
+interface Precarga { proveedor: number | ""; lineas: Linea[] }
+
 let siguiente = 0;
 const lineaVacia = (): Linea => ({ clave: siguiente++, producto_id: 0, cantidad: 1, coste_unitario: 0, fecha_caducidad: "" });
 
+type Vista = "nueva" | "pedido" | "historial";
+
 export default function Compras() {
+  const [vista, setVista] = useState<Vista>("nueva");
+  const [precarga, setPrecarga] = useState<Precarga | null>(null);
+  const [version, setVersion] = useState(0);
+
+  const cargarPedido = (p: Precarga) => { setPrecarga(p); setVersion((v) => v + 1); setVista("nueva"); };
+
+  return (
+    <>
+      <Cabecera titulo="Compras" subtitulo="Lo que entra de los proveedores. Los costes van sin IVA.">
+        <Pestañas<Vista> valor={vista} alCambiar={setVista} opciones={[
+          { id: "nueva", nombre: "Registrar compra" }, { id: "pedido", nombre: "Qué pedir" }, { id: "historial", nombre: "Historial" },
+        ]} />
+      </Cabecera>
+      {vista === "nueva" && <NuevaCompra key={version} inicial={precarga} />}
+      {vista === "pedido" && <PedidoSugerido alCargar={cargarPedido} />}
+      {vista === "historial" && <Historial />}
+    </>
+  );
+}
+
+function NuevaCompra({ inicial }: { inicial: Precarga | null }) {
   const productos = useDatos<ProductoAdmin[]>("/productos/admin");
   const proveedores = useDatos<Proveedor[]>("/proveedores");
   const avisar = useAviso();
-  const [proveedor, setProveedor] = useState<number | "">("");
+  const [proveedor, setProveedor] = useState<number | "">(inicial?.proveedor ?? "");
   const [factura, setFactura] = useState("");
-  const [lineas, setLineas] = useState<Linea[]>([lineaVacia()]);
+  const [lineas, setLineas] = useState<Linea[]>(inicial?.lineas.length ? inicial.lineas : [lineaVacia()]);
   const [guardando, setGuardando] = useState(false);
 
   const prod = (id: number) => productos.datos?.find((p) => p.id === id);
@@ -66,7 +96,6 @@ export default function Compras() {
 
   return (
     <>
-      <Cabecera titulo="Registrar compra" subtitulo="Pasa el albarán o la factura del proveedor. Los costes van sin IVA." />
       <div className="grid gap-6 xl:grid-cols-[1fr_320px]">
         <div className="tarjeta p-5">
           <div className="mb-6 grid gap-4 sm:grid-cols-2">
@@ -157,6 +186,143 @@ export default function Compras() {
           <p className="mt-3 text-center text-xs text-tenue">El stock, el coste medio y los lotes se actualizan solos.</p>
         </aside>
       </div>
+    </>
+  );
+}
+
+/* =====================================================================
+   Qué pedir: productos con stock bajo agrupados por proveedor
+   ===================================================================== */
+function PedidoSugerido({ alCargar }: { alCargar: (p: Precarga) => void }) {
+  const { datos } = useDatos<Sugerencia[]>("/pedido-sugerido");
+  const grupos = new Map<string, Sugerencia[]>();
+  (datos ?? []).forEach((s) => {
+    const clave = s.proveedor ?? "Sin proveedor";
+    grupos.set(clave, [...(grupos.get(clave) ?? []), s]);
+  });
+
+  const cargar = (lista: Sugerencia[]) => alCargar({
+    proveedor: lista[0].proveedor_id ?? "",
+    lineas: lista.map((s) => ({
+      clave: siguiente++, producto_id: s.id, fecha_caducidad: "",
+      cantidad: s.unidad_medida === "kg" ? s.cantidad_sugerida : Math.ceil(s.cantidad_sugerida) || 1,
+      coste_unitario: s.coste_medio,
+    })),
+  });
+
+  if (!datos) return <div className="grid gap-4 md:grid-cols-2">{[1, 2].map((i) => <Esqueleto key={i} className="h-48" />)}</div>;
+  if (!datos.length) return <div className="tarjeta"><Vacio icono={<PackageCheck className="size-6" />} titulo="No falta nada">Ningún producto está por debajo de su stock mínimo.</Vacio></div>;
+
+  return (
+    <>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-suave">Cantidad sugerida: lo que falta para llegar al doble del stock mínimo. Ajústala al registrar la compra.</p>
+        <button className="boton-sec" onClick={() => descargarCsv("pedido_sugerido", datos, [["proveedor", "Proveedor"], ["producto", "Producto"], ["stock_actual", "Stock"], ["cantidad_sugerida", "Pedir"], ["coste_estimado", "Coste estimado"]])}>
+          <Download className="size-4" /> CSV
+        </button>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        {[...grupos].map(([proveedor, lista]) => (
+          <div key={proveedor} className="tarjeta flex flex-col">
+            <div className="flex items-center justify-between border-b border-borde p-4">
+              <h2 className="flex items-center gap-2 font-semibold"><Truck className="size-4 text-marca-500" />{proveedor}</h2>
+              <span className="text-sm text-suave">aprox. {euros(lista.reduce((t, s) => t + s.coste_estimado, 0))}</span>
+            </div>
+            <ul className="flex-1 divide-y divide-borde">
+              {lista.map((s) => (
+                <li key={s.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+                  <span><span className="font-medium">{s.producto}</span><span className="block text-xs text-tenue">quedan {cantidad(s.stock_actual, s.unidad_medida)} · mínimo {cantidad(s.stock_minimo, s.unidad_medida)}</span></span>
+                  <span className="whitespace-nowrap font-semibold tabular-nums">{cantidad(s.cantidad_sugerida, s.unidad_medida)}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="p-4 pt-2"><button className="boton-sec w-full" onClick={() => cargar(lista)}><ClipboardList className="size-4" /> Registrar esta compra</button></div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/* =====================================================================
+   Historial de compras
+   ===================================================================== */
+interface CompraResumen { id: number; fecha: string; numero_factura: string | null; total_sin_iva: number; usuario: string | null; proveedor: string | null; lineas: number }
+interface LineaCompraDetalle { id: number; producto: string; unidad_medida: string; cantidad: number; coste_unitario: number; fecha_caducidad: string | null; subtotal: number }
+type CompraDetalle = Omit<CompraResumen, "lineas"> & { notas: string | null; lineas: LineaCompraDetalle[] };
+
+function Historial() {
+  const avisar = useAviso();
+  const [dias, setDias] = useState(90);
+  const { datos } = useDatos<CompraResumen[]>(`/compras?dias=${dias}`);
+  const [abierta, setAbierta] = useState<number | null>(null);
+  const detalle = useDatos<CompraDetalle>(abierta ? `/compras/${abierta}` : null, false);
+  const [aBorrar, setABorrar] = useState<number | null>(null);
+
+  async function borrarCompra(id: number) {
+    try {
+      await borrar(`/compras/${id}`);
+      avisar("ok", `Compra nº ${id} borrada. El stock se ha descontado.`);
+      setAbierta(null);
+      emitirCambio();
+    } catch (e) {
+      avisar("error", (e as Error).message);
+    }
+  }
+
+  return (
+    <>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <select className="campo w-auto py-1.5" aria-label="Periodo" value={dias} onChange={(e) => setDias(Number(e.target.value))}>
+          <option value={30}>Últimos 30 días</option><option value={90}>Últimos 3 meses</option><option value={365}>Último año</option><option value={3650}>Todas</option>
+        </select>
+        {datos && <span className="text-sm text-suave">{datos.length} compras · {euros(datos.reduce((t, c) => t + c.total_sin_iva, 0))} sin IVA</span>}
+      </div>
+      <div className="tarjeta overflow-x-auto">
+        {!datos ? <div className="p-5"><Esqueleto className="h-40" /></div> : !datos.length ? <Vacio icono={<Truck className="size-6" />} titulo="Sin compras en este periodo" /> : (
+          <table className="tabla w-full text-sm">
+            <thead><tr><th>Nº</th><th>Fecha</th><th>Proveedor</th><th className="hidden sm:table-cell">Factura</th><th className="hidden text-right sm:table-cell">Líneas</th><th className="text-right">Total sin IVA</th></tr></thead>
+            <tbody>
+              {datos.map((c) => (
+                <tr key={c.id} className="cursor-pointer hover:bg-superficie-2/60" onClick={() => setAbierta(c.id)}>
+                  <td className="font-medium tabular-nums">{c.id}</td>
+                  <td className="text-suave">{fecha(c.fecha)}</td>
+                  <td>{c.proveedor ?? "—"}</td>
+                  <td className="hidden text-suave sm:table-cell">{c.numero_factura ?? "—"}</td>
+                  <td className="hidden text-right tabular-nums sm:table-cell">{c.lineas}</td>
+                  <td className="text-right font-semibold tabular-nums">{euros(c.total_sin_iva)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <Modal abierto={abierta != null} alCerrar={() => setAbierta(null)} titulo={`Compra nº ${abierta ?? ""}`} ancho="max-w-xl">
+        {!detalle.datos || detalle.datos.id !== abierta ? <Esqueleto className="h-40" /> : (
+          <>
+            <p className="mb-3 text-sm text-suave">
+              {fechaHora(detalle.datos.fecha)} · {detalle.datos.proveedor ?? "Sin proveedor"}{detalle.datos.numero_factura ? ` · factura ${detalle.datos.numero_factura}` : ""} · {detalle.datos.usuario ?? "—"}
+            </p>
+            <ul className="mb-4 max-h-[45vh] divide-y divide-borde overflow-y-auto rounded-xl border border-borde">
+              {detalle.datos.lineas.map((l) => (
+                <li key={l.id} className="flex justify-between gap-3 px-4 py-2.5 text-sm">
+                  <span><span className="font-medium">{l.producto}</span><span className="block text-xs text-tenue">{cantidad(l.cantidad, l.unidad_medida)} × {euros(l.coste_unitario)}{l.fecha_caducidad ? ` · caduca ${fecha(l.fecha_caducidad)}` : ""}</span></span>
+                  <span className="font-semibold tabular-nums">{euros(l.subtotal)}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="mb-5 flex items-baseline justify-between"><span className="text-suave">Total sin IVA</span><span className="text-2xl font-bold tabular-nums">{euros(detalle.datos.total_sin_iva)}</span></div>
+            <div className="flex justify-end">
+              <button className="boton-sec text-rose-600 dark:text-rose-400" onClick={() => setABorrar(detalle.datos!.id)}><Trash2 className="size-4" /> Borrar compra</button>
+            </div>
+          </>
+        )}
+      </Modal>
+
+      <Confirmar abierto={aBorrar != null} alCerrar={() => setABorrar(null)} alConfirmar={() => aBorrar && borrarCompra(aBorrar)}
+        titulo="Borrar compra" textoBoton="Borrar" peligro
+        mensaje="Se quitará del stock todo lo que entró con esta compra (útil si se metió mal). Si parte ya se ha vendido, no se podrá borrar." />
     </>
   );
 }

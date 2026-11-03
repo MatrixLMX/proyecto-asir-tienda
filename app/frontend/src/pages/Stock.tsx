@@ -1,7 +1,15 @@
-import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, PackageSearch, Search } from "lucide-react";
-import { cantidad, euros, type ProductoStock } from "../api";
-import { Cabecera, Esqueleto, Insignia, Pestañas, Vacio, useDatos } from "../ui";
+import { useMemo, useState, type FormEvent } from "react";
+import { ArrowDown, ArrowUp, PackageMinus, PackageSearch, Search } from "lucide-react";
+import { cantidad, euros, post, type ProductoStock } from "../api";
+import { Cabecera, Esqueleto, Insignia, Modal, Pestañas, Vacio, emitirCambio, useAviso, useDatos } from "../ui";
+
+const MOTIVOS = [
+  { id: "roto", nombre: "Roto o estropeado" },
+  { id: "caducado", nombre: "Caducado" },
+  { id: "consumo_propio", nombre: "Consumo propio" },
+  { id: "robo", nombre: "Robo o desaparecido" },
+  { id: "otro", nombre: "Otro motivo" },
+] as const;
 
 type Filtro = "todos" | "BAJO" | "AGOTADO";
 type Orden = "producto" | "categoria" | "precio_venta" | "stock_actual";
@@ -11,6 +19,7 @@ export default function Stock() {
   const [q, setQ] = useState("");
   const [filtro, setFiltro] = useState<Filtro>("todos");
   const [orden, setOrden] = useState<{ campo: Orden; asc: boolean }>({ campo: "producto", asc: true });
+  const [merma, setMerma] = useState<ProductoStock | null>(null);
 
   const cuenta = (e: Filtro) => (datos ?? []).filter((p) => e === "todos" || p.estado === e).length;
   const filas = useMemo(() => {
@@ -68,6 +77,7 @@ export default function Stock() {
                 <Columna campo="precio_venta" derecha>PVP</Columna>
                 <Columna campo="stock_actual" derecha>Stock</Columna>
                 <th className="hidden sm:table-cell">Nivel</th>
+                <th><span className="sr-only">Acciones</span></th>
               </tr>
             </thead>
             <tbody>
@@ -91,6 +101,15 @@ export default function Stock() {
                         {p.estado !== "OK" && <Insignia color={color}>{p.estado.toLowerCase()}</Insignia>}
                       </div>
                     </td>
+                    <td className="w-10 text-right">
+                      <button
+                        className="rounded-lg p-1.5 text-tenue hover:bg-superficie-2 hover:text-rose-500 disabled:opacity-30"
+                        disabled={p.stock_actual <= 0} onClick={() => setMerma(p)}
+                        title="Registrar merma (roto, caducado…)" aria-label={`Registrar merma de ${p.producto}`}
+                      >
+                        <PackageMinus className="size-4" />
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -98,6 +117,66 @@ export default function Stock() {
           </table>
         ) : <Vacio icono={<PackageSearch className="size-6" />} titulo="Sin resultados" />}
       </div>
+      <p className="mt-3 flex items-center gap-1.5 text-xs text-tenue">
+        <PackageMinus className="size-3.5" /> Usa este botón para quitar del stock lo que se rompe, se gasta en casa o desaparece.
+      </p>
+
+      <RegistrarMerma producto={merma} alCerrar={() => setMerma(null)} />
     </>
+  );
+}
+
+function RegistrarMerma({ producto: p, alCerrar }: { producto: ProductoStock | null; alCerrar: () => void }) {
+  const avisar = useAviso();
+  const [n, setN] = useState("1");
+  const [motivo, setMotivo] = useState<(typeof MOTIVOS)[number]["id"]>("roto");
+  const [notas, setNotas] = useState("");
+  const valor = Number(n.replace(",", ".")) || 0;
+  const valido = p && valor > 0 && valor <= p.stock_actual && (p.unidad_medida === "kg" || Number.isInteger(valor));
+
+  async function guardar(e: FormEvent) {
+    e.preventDefault();
+    if (!p) return;
+    try {
+      await post("/mermas", { producto_id: p.id, cantidad: valor, motivo, notas: notas || null });
+      avisar("ok", `${cantidad(valor, p.unidad_medida)} de ${p.producto} retirado del stock`);
+      emitirCambio();
+      setN("1"); setNotas(""); alCerrar();
+    } catch (err) {
+      avisar("error", (err as Error).message);
+    }
+  }
+
+  return (
+    <Modal abierto={!!p} alCerrar={alCerrar} titulo="Registrar merma">
+      {p && (
+        <form onSubmit={guardar} className="space-y-4">
+          <p className="rounded-xl bg-superficie-2 px-4 py-3 text-sm">
+            <b>{p.producto}</b><span className="block text-xs text-tenue">Hay {cantidad(p.stock_actual, p.unidad_medida)} en stock</span>
+          </p>
+          <div>
+            <label className="etiqueta" htmlFor="m-cant">Cantidad {p.unidad_medida === "kg" ? "(kg)" : "(unidades)"}</label>
+            <input id="m-cant" className="campo" inputMode="decimal" autoFocus value={n} onChange={(e) => setN(e.target.value)} />
+          </div>
+          <div>
+            <span className="etiqueta">Motivo</span>
+            <div className="grid grid-cols-2 gap-2">
+              {MOTIVOS.map((m) => (
+                <button type="button" key={m.id} onClick={() => setMotivo(m.id)}
+                  className={`rounded-xl border px-3 py-2 text-sm ${motivo === m.id ? "border-marca-500 bg-marca-suave font-medium text-marca-fuerte" : "border-borde text-suave"}`}>
+                  {m.nombre}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div><label className="etiqueta" htmlFor="m-notas">Notas (opcional)</label><input id="m-notas" className="campo" maxLength={255} value={notas} onChange={(e) => setNotas(e.target.value)} /></div>
+          <p className="text-xs text-tenue">Cuenta como pérdida en los beneficios y queda en el registro de cambios.</p>
+          <div className="flex justify-end gap-2">
+            <button type="button" className="boton-sec" onClick={alCerrar}>Cancelar</button>
+            <button className="boton-peligro" disabled={!valido}>Quitar del stock</button>
+          </div>
+        </form>
+      )}
+    </Modal>
   );
 }

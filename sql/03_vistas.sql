@@ -70,6 +70,46 @@ SELECT l.id            AS lote_id,
  WHERE l.cantidad_restante > 0
    AND l.fecha_caducidad <= CURDATE() + INTERVAL p.dias_aviso_caducidad DAY;
 
+-- Líneas de un ticket SIN costes: para consultar ventas pasadas e
+-- imprimir el ticket desde el perfil dependiente.
+CREATE OR REPLACE VIEW v_lineas_ticket AS
+SELECT lv.venta_id,
+       p.nombre        AS producto,
+       p.unidad_medida,
+       lv.cantidad,
+       lv.precio_unitario,
+       lv.iva_porcentaje,
+       ROUND(lv.cantidad * lv.precio_unitario, 2) AS importe
+  FROM lineas_venta lv
+  JOIN productos p ON p.id = lv.producto_id;
+
+-- Caja de cada día por forma de pago (para el cierre de caja)
+CREATE OR REPLACE VIEW v_caja_diaria AS
+SELECT DATE(fecha) AS dia,
+       COUNT(*)    AS tickets,
+       SUM(IF(metodo_pago = 'efectivo', total, 0)) AS total_efectivo,
+       SUM(IF(metodo_pago = 'tarjeta',  total, 0)) AS total_tarjeta,
+       SUM(IF(metodo_pago = 'bizum',    total, 0)) AS total_bizum,
+       SUM(total)  AS total
+  FROM ventas
+ GROUP BY DATE(fecha);
+
+-- Productos con stock que no se venden: días desde la última venta
+CREATE OR REPLACE VIEW v_productos_parados AS
+SELECT p.id,
+       p.nombre      AS producto,
+       c.nombre      AS categoria,
+       p.unidad_medida,
+       p.stock_actual,
+       MAX(v.fecha)  AS ultima_venta,
+       DATEDIFF(CURDATE(), COALESCE(MAX(v.fecha), p.creado_en)) AS dias_sin_vender
+  FROM productos p
+  JOIN categorias c         ON c.id = p.categoria_id
+  LEFT JOIN lineas_venta lv ON lv.producto_id = p.id
+  LEFT JOIN ventas v        ON v.id = lv.venta_id
+ WHERE p.activo AND p.stock_actual > 0
+ GROUP BY p.id, p.nombre, c.nombre, p.unidad_medida, p.stock_actual, p.creado_en;
+
 -- ---------------------------------------------------------------------
 --  Vistas financieras (solo administrador)
 -- ---------------------------------------------------------------------

@@ -6,7 +6,7 @@ Uso, desde app/backend:
 """
 from getpass import getpass
 
-import bcrypt
+from .auth import hash_password
 
 from .db import conexion
 
@@ -21,7 +21,7 @@ def main() -> None:
     if len(password) < 8 or password != getpass("Repite la contraseña: "):
         raise SystemExit("Las contraseñas no coinciden o son demasiado cortas.")
 
-    hash_ = bcrypt.hashpw(password.encode(), bcrypt.gensalt(12)).decode()
+    hash_ = hash_password(password)
     with conexion("admin") as con, con.cursor() as cur:
         cur.execute(
             "INSERT INTO usuarios_app (usuario, nombre, password_hash, rol) VALUES (%s, %s, %s, %s) "

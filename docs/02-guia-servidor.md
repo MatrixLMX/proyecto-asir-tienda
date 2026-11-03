@@ -202,7 +202,26 @@ cd /opt/tienda/app/backend
 sudo -u tienda bash -c 'set -a; . /opt/tienda/.env; set +a; .venv/bin/python -m app.crear_usuario'
 ```
 
-Abre `https://IP-DEL-SERVIDOR` desde Windows. El navegador avisará de que el certificado es autofirmado: es normal en una red interna. Acepta el aviso.
+Abre `https://IP-DEL-SERVIDOR` desde Windows.
+
+### Certificado HTTPS sin avisos
+
+El script crea una **autoridad de certificación (CA) propia de la tienda** y firma con ella el certificado del servidor. Para que el navegador no avise de "conexión no segura", instala la CA **una vez en cada dispositivo**:
+
+1. Desde el dispositivo, abre `http://IP-DEL-SERVIDOR/ca-tienda.crt` (por HTTP, sin la "s").
+2. **Windows**: abre el fichero → *Instalar certificado* → *Equipo local* → *Colocar todos los certificados en el siguiente almacén* → **Entidades de certificación raíz de confianza**. Reinicia el navegador.
+3. **Android**: *Ajustes → Seguridad → Cifrado y credenciales → Instalar un certificado → Certificado de CA*.
+4. **iPhone**: abre el enlace con Safari, instala el perfil en *Ajustes → General → VPN y gestión de dispositivos* y actívalo en *Ajustes → General → Información → Ajustes de confianza de certificados*.
+
+La clave privada de la CA (`/etc/ssl/tienda/ca-tienda.key`) no sale nunca del servidor. Si cambia la IP del servidor, vuelve a ejecutar `03_desplegar_web.sh`: regenera el certificado con la IP nueva.
+
+### Nombre y datos fiscales de la tienda
+
+En `/opt/tienda/.env` pon `NOMBRE_TIENDA`, `NIF_TIENDA` y `DIRECCION_TIENDA`. Salen en la web y en el ticket impreso (una factura simplificada debe llevar el NIF). Después: `sudo systemctl restart tienda-api`.
+
+### Instalar la web como aplicación
+
+Con HTTPS sin avisos, en el móvil o la tablet: menú del navegador → **Añadir a la pantalla de inicio** (o *Instalar aplicación*). Queda con su icono y se abre a pantalla completa.
 
 Comandos útiles:
 
@@ -219,6 +238,33 @@ cd /opt/tienda && sudo git pull && sudo bash scripts/servidor/03_desplegar_web.s
 ```
 
 📸 **Snapshot: "web"**
+
+## Fase 9. Monitorización
+
+```bash
+sudo bash scripts/servidor/04_monitorizar.sh --instalar
+```
+
+Cada 15 minutos comprueba que MariaDB, Apache, la API y Fail2ban están en marcha, que la API llega a la base de datos, el espacio en disco, que la última copia de seguridad tiene menos de 26 horas y que el certificado no va a caducar. El resultado se ve con:
+
+```bash
+sudo tienda-monitor                      # comprobación manual
+journalctl -t tienda-monitor --since today
+```
+
+Para recibir un **correo** cuando algo falle (y cuando se arregle), instala un programa de correo como `msmtp-mta`, configúralo con una cuenta (por ejemplo, de Gmail con contraseña de aplicación) y pon tu dirección en `AVISO_EMAIL` dentro de `/etc/default/tienda-monitor`.
+
+### Bloqueo de intentos de login en la web
+
+Además del SSH, Fail2ban vigila el **login de la web** (jail `tienda-web`): 5 contraseñas mal en 10 minutos bloquean esa IP una hora en el cortafuegos. La propia API también frena a quien falla 5 veces seguidas. Para comprobarlo:
+
+```bash
+sudo fail2ban-client status tienda-web
+sudo journalctl -u tienda-api | grep "LOGIN FALLIDO"
+sudo fail2ban-client set tienda-web unbanip 192.168.1.50     # desbloquear una IP
+```
+
+📸 **Snapshot: "monitorizacion"**
 
 ---
 

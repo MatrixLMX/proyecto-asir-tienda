@@ -11,8 +11,9 @@ import { api } from "./api";
 /** Avisa al resto de pantallas de que algo ha cambiado (venta, compra...). */
 export const emitirCambio = () => window.dispatchEvent(new Event("tienda:cambio"));
 
-/** Carga datos de la API, permite recargarlos y se refresca tras un cambio. */
-export function useDatos<T>(ruta: string | null) {
+/** Carga datos de la API, permite recargarlos y se refresca tras un cambio
+ *  (salvo con escuchar = false: p. ej. el detalle de algo que se puede borrar). */
+export function useDatos<T>(ruta: string | null, escuchar = true) {
   const [datos, setDatos] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const recargar = useCallback(() => {
@@ -21,9 +22,10 @@ export function useDatos<T>(ruta: string | null) {
   }, [ruta]);
   useEffect(() => {
     recargar();
+    if (!escuchar) return;
     window.addEventListener("tienda:cambio", recargar);
     return () => window.removeEventListener("tienda:cambio", recargar);
-  }, [recargar]);
+  }, [recargar, escuchar]);
   return { datos, error, cargando: datos === null && !error && !!ruta, recargar };
 }
 

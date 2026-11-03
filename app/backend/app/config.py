@@ -22,8 +22,20 @@ class Settings(BaseSettings):
     google_api_key: str | None = None
     groq_api_key: str | None = None
     anthropic_api_key: str | None = None
+    # Modelo de reserva si el principal falla (saturado, sin cuota...).
+    # Opcional: p. ej. LLM_RESERVA_PROVIDER=groq y LLM_RESERVA_MODEL=openai/gpt-oss-120b
+    llm_reserva_provider: str | None = None
+    llm_reserva_model: str | None = None
 
     cors_origins: str = "http://localhost:5173"
+
+    # Nombre que aparece en la web y en los tickets
+    nombre_tienda: str = "Mi Tienda"
+    # Datos fiscales para el ticket (factura simplificada)
+    nif_tienda: str = ""
+    direccion_tienda: str = ""
+    # Login: intentos fallidos permitidos por IP antes de bloquear 15 minutos
+    login_max_intentos: int = 5
 
 
 settings = Settings()

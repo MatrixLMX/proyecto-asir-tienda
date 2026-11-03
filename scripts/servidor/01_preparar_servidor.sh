@@ -68,6 +68,7 @@ ufw status verbose
 
 paso "6. Fail2ban"
 install -m 644 "$REPO/config/fail2ban/jail.local" /etc/fail2ban/jail.local
+install -m 644 "$REPO/config/fail2ban/filter.d/tienda-web.conf" /etc/fail2ban/filter.d/tienda-web.conf
 systemctl enable --now fail2ban
 systemctl restart fail2ban
 sleep 2

@@ -153,6 +153,20 @@ CREATE TABLE lineas_venta (
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------------
+--  De qué lote salió cada línea de venta. Sirve para que, al anular
+--  una venta, el producto vuelva exactamente a sus lotes (y a su fecha
+--  de caducidad).
+-- ---------------------------------------------------------------------
+CREATE TABLE lotes_consumidos (
+  id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  linea_venta_id  INT UNSIGNED  NOT NULL,
+  lote_id         INT UNSIGNED  NOT NULL,
+  cantidad        DECIMAL(10,3) NOT NULL,
+  CONSTRAINT fk_lcons_linea FOREIGN KEY (linea_venta_id) REFERENCES lineas_venta(id) ON DELETE CASCADE,
+  CONSTRAINT fk_lcons_lote  FOREIGN KEY (lote_id)        REFERENCES lotes(id)        ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------------------
 --  Mermas: producto que sale del almacén sin venderse (caducado, roto).
 --  Cuenta como pérdida en los informes de beneficio.
 -- ---------------------------------------------------------------------
@@ -169,6 +183,43 @@ CREATE TABLE mermas (
   CONSTRAINT fk_merma_producto FOREIGN KEY (producto_id) REFERENCES productos(id),
   CONSTRAINT fk_merma_lote     FOREIGN KEY (lote_id)     REFERENCES lotes(id) ON DELETE SET NULL,
   CONSTRAINT chk_merma_cantidad CHECK (cantidad > 0)
+) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------------------
+--  Cierre de caja: al acabar el día se cuenta el efectivo y se compara
+--  con lo que dicen las ventas. Un cierre por día.
+-- ---------------------------------------------------------------------
+CREATE TABLE cierres_caja (
+  id                 INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  fecha              DATE          NOT NULL UNIQUE,
+  tickets            INT UNSIGNED  NOT NULL,
+  total_efectivo     DECIMAL(12,2) NOT NULL,
+  total_tarjeta      DECIMAL(12,2) NOT NULL,
+  total_bizum        DECIMAL(12,2) NOT NULL,
+  fondo_inicial      DECIMAL(12,2) NOT NULL DEFAULT 0,  -- cambio con el que se abrió la caja
+  efectivo_contado   DECIMAL(12,2) NOT NULL,
+  diferencia         DECIMAL(12,2) AS (efectivo_contado - fondo_inicial - total_efectivo) PERSISTENT,
+  usuario            VARCHAR(40)   NULL,
+  notas              VARCHAR(255)  NULL,
+  creado_en          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------------------
+--  Auditoría: registro de cambios delicados (precios, ventas anuladas,
+--  compras borradas, mermas, usuarios). La rellenan los triggers.
+--  El usuario de la web lo pasa la aplicación en la variable de sesión
+--  @usuario_app; si no existe (cambio hecho a mano en el servidor), se
+--  guarda el usuario de MariaDB.
+-- ---------------------------------------------------------------------
+CREATE TABLE auditoria (
+  id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  fecha        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  usuario      VARCHAR(80)   NOT NULL,
+  accion       VARCHAR(40)   NOT NULL,
+  tabla        VARCHAR(40)   NOT NULL,
+  registro_id  INT UNSIGNED  NULL,
+  detalle      VARCHAR(500)  NULL,
+  INDEX idx_auditoria_fecha (fecha)
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------------

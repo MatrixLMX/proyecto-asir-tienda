@@ -15,6 +15,15 @@ enabled  = true
 maxretry = 3
 bantime  = 24h
 
+# Login de la web: 5 contraseñas mal en 10 minutos -> 1 hora fuera.
+# (La API además frena por su cuenta: ver app/backend/app/auth.py)
+[tienda-web]
+enabled  = true
+filter   = tienda-web
+port     = http,https
+maxretry = 5
+bantime  = 1h
+
 # Reincidentes: si una IP es bloqueada 3 veces en un día, 1 semana fuera
 [recidive]
 enabled  = true

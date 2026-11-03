@@ -87,3 +87,36 @@ export const cantidad = (n: number, unidad: string) =>
 
 export const fecha = (iso: string) =>
   new Date(iso).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
+
+export const patch = <T = unknown>(ruta: string, datos: unknown) =>
+  api<T>(ruta, { method: "PATCH", body: JSON.stringify(datos) });
+
+export const borrar = <T = unknown>(ruta: string) => api<T>(ruta, { method: "DELETE" });
+
+export const fechaHora = (iso: string) =>
+  new Date(iso).toLocaleString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+
+/** Fecha de hoy (o desplazada) en formato AAAA-MM-DD, en hora local. */
+export const diaISO = (desplazamiento = 0) => {
+  const d = new Date();
+  d.setDate(d.getDate() + desplazamiento);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+/** Descarga una tabla como CSV que Excel abre bien (separador ; y coma decimal). */
+export function descargarCsv<T extends object>(nombre: string, filas: T[], columnas: [string, string][]) {
+  const celda = (v: unknown) => {
+    const texto = typeof v === "number" ? v.toLocaleString("es-ES", { useGrouping: false, maximumFractionDigits: 4 }) : String(v ?? "");
+    return /[;"\n]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
+  };
+  const lineas = [columnas.map(([, t]) => t).join(";"), ...filas.map((f) => columnas.map(([k]) => celda((f as Record<string, unknown>)[k])).join(";"))];
+  const blob = new Blob(["﻿" + lineas.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${nombre}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+export interface LineaTicket { producto: string; unidad_medida: string; cantidad: number; precio_unitario: number; iva_porcentaje: number; importe: number }
+export interface Venta { id: number; fecha: string; metodo_pago: "efectivo" | "tarjeta" | "bizum"; total: number; usuario: string | null; lineas?: LineaTicket[] }

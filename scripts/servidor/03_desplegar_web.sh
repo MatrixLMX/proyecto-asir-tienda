@@ -41,17 +41,40 @@ npm run build
 mkdir -p /var/www/tienda
 rsync -a --delete dist/ /var/www/tienda/
 
-paso "5. Certificado HTTPS autofirmado (red interna)"
-if [[ ! -f /etc/ssl/tienda/tienda.crt ]]; then
-  mkdir -p /etc/ssl/tienda
-  openssl req -x509 -nodes -newkey rsa:2048 -days 1825 \
-    -keyout /etc/ssl/tienda/tienda.key -out /etc/ssl/tienda/tienda.crt \
-    -subj "/CN=tienda.local" -addext "subjectAltName=DNS:tienda.local,DNS:$(hostname),IP:$(hostname -I | awk '{print $1}')"
-  chmod 600 /etc/ssl/tienda/tienda.key
+paso "5. Certificado HTTPS con autoridad (CA) propia de la tienda"
+# Se crea una CA propia y con ella se firma el certificado del servidor.
+# Instalando ca-tienda.crt una sola vez en cada ordenador o móvil de la
+# tienda, el navegador deja de avisar de "conexión no segura".
+# (Let's Encrypt no sirve: el servidor no es accesible desde Internet.)
+SSL=/etc/ssl/tienda
+IP_SERVIDOR=$(hostname -I | awk '{print $1}')
+mkdir -p "$SSL"
+if [[ ! -f $SSL/ca-tienda.crt ]]; then
+  openssl req -x509 -nodes -newkey rsa:3072 -days 3650 \
+    -keyout "$SSL/ca-tienda.key" -out "$SSL/ca-tienda.crt" \
+    -subj "/CN=CA de la tienda" -addext "basicConstraints=critical,CA:TRUE" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign"
+  chmod 600 "$SSL/ca-tienda.key"
 fi
+# El del servidor se (re)crea si no existe, si cambia la IP o si le
+# quedan menos de 30 días
+if [[ ! -f $SSL/tienda.crt ]] \
+   || ! openssl x509 -in "$SSL/tienda.crt" -noout -checkend 2592000 >/dev/null \
+   || ! openssl x509 -in "$SSL/tienda.crt" -noout -ext subjectAltName | grep -q "$IP_SERVIDOR"; then
+  openssl req -new -nodes -newkey rsa:2048 -subj "/CN=tienda.local" \
+    -keyout "$SSL/tienda.key" -out "$SSL/tienda.csr"
+  printf 'subjectAltName=DNS:tienda.local,DNS:%s,IP:%s\nextendedKeyUsage=serverAuth\n' \
+    "$(hostname)" "$IP_SERVIDOR" > "$SSL/ext.cnf"
+  openssl x509 -req -in "$SSL/tienda.csr" -CA "$SSL/ca-tienda.crt" -CAkey "$SSL/ca-tienda.key" \
+    -CAcreateserial -days 825 -sha256 -extfile "$SSL/ext.cnf" -out "$SSL/tienda.crt"
+  chmod 600 "$SSL/tienda.key"
+  rm -f "$SSL/tienda.csr" "$SSL/ext.cnf"
+fi
+# Para instalarlo en los dispositivos: http://<IP del servidor>/ca-tienda.crt
+install -m 644 "$SSL/ca-tienda.crt" /var/www/tienda/ca-tienda.crt
 
 paso "6. Apache"
-a2enmod -q ssl proxy proxy_http headers
+a2enmod -q ssl proxy proxy_http headers rewrite
 install -m 644 "$REPO/config/apache/tienda.conf" /etc/apache2/sites-available/tienda.conf
 a2dissite -q 000-default || true
 a2ensite -q tienda
