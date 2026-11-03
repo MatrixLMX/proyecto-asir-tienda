@@ -245,3 +245,57 @@ def test_el_admin_no_se_puede_quitar_a_si_mismo():
     admin_id = consultar("admin", "SELECT id FROM usuarios_app WHERE usuario = 'admin'")[0]["id"]
     r = cliente.patch(f"/api/usuarios/{admin_id}", headers=ADMIN, json={"activo": False})
     assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------
+#  Alta de productos con coste, stock inicial y código de barras
+# ---------------------------------------------------------------------
+def _borrar_producto(producto_id: int):
+    with conexion("admin") as con, con.cursor() as cur:
+        cur.execute("DELETE FROM compras WHERE id IN (SELECT compra_id FROM lineas_compra WHERE producto_id = %s)",
+                    (producto_id,))
+        cur.execute("DELETE FROM productos WHERE id = %s", (producto_id,))
+
+
+def test_alta_con_stock_inicial_crea_compra_lote_y_coste():
+    base = _producto("Pan de molde")
+    r = cliente.post("/api/productos", headers=ADMIN, json={
+        "nombre": "Prueba yogur griego", "codigo_barras": "9990000000017", "categoria_id": base["categoria_id"],
+        "iva_id": base["iva_id"], "precio_venta": 1.5, "controla_caducidad": True,
+        "coste_compra": 0.8, "stock_inicial": 12, "fecha_caducidad": str(date.today() + timedelta(days=9)),
+    })
+    assert r.status_code == 200, r.text
+    pid = r.json()["id"]
+    try:
+        p = _producto("Prueba yogur griego")
+        assert float(p["stock_actual"]) == 12 and float(p["coste_medio"]) == 0.8
+        assert list(_lotes(pid).values()) == [12]
+        assert r.json()["compra_id"]
+        # El mismo código de barras no se puede repetir: 409 con mensaje claro
+        r2 = cliente.post("/api/productos", headers=ADMIN, json={
+            "nombre": "Otro", "codigo_barras": "9990000000017", "categoria_id": base["categoria_id"],
+            "iva_id": base["iva_id"], "precio_venta": 1})
+        assert r2.status_code == 409 and "código de barras" in r2.json()["detail"]
+        # Consultar un código que ya está en el catálogo
+        c = cliente.get("/api/codigo/9990000000017", headers=ADMIN).json()
+        assert c["en_catalogo"]["id"] == pid
+        # Corregir el coste a mano queda en la auditoría
+        assert cliente.patch(f"/api/productos/{pid}", headers=ADMIN, json={"coste_medio": 0.75}).status_code == 200
+        assert _ultima_auditoria()["accion"] == "cambiar_coste"
+        assert float(_producto("Prueba yogur griego")["coste_medio"]) == 0.75
+    finally:
+        _borrar_producto(pid)
+
+
+def test_alta_sin_fecha_de_un_producto_que_caduca_no_guarda_nada():
+    base = _producto("Pan de molde")
+    r = cliente.post("/api/productos", headers=ADMIN, json={
+        "nombre": "Prueba sin fecha", "categoria_id": base["categoria_id"], "iva_id": base["iva_id"],
+        "precio_venta": 1, "controla_caducidad": True, "stock_inicial": 3})
+    assert r.status_code == 400
+    assert not consultar("admin", "SELECT id FROM productos WHERE nombre = 'Prueba sin fecha'")
+
+
+def test_codigo_no_valido_y_solo_admin():
+    assert cliente.get("/api/codigo/abc", headers=ADMIN).status_code == 400
+    assert cliente.get("/api/codigo/8410000000000", headers=DEPENDIENTE).status_code == 403

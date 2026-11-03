@@ -30,7 +30,9 @@ export default function Asistente({ disponible, rol }: { disponible: boolean; ro
   const fin = useRef<HTMLDivElement>(null);
   const entrada = useRef<HTMLInputElement>(null);
 
-  useEffect(() => fin.current?.scrollIntoView({ behavior: "smooth" }), [mensajes, pensando]);
+  // Con llaves: en Chrome reciente scrollIntoView devuelve una promesa y React
+  // la tomaría por la función de limpieza (la app entera se caía)
+  useEffect(() => { fin.current?.scrollIntoView({ behavior: "smooth" }); }, [mensajes, pensando]);
   useEffect(() => { if (abierto) entrada.current?.focus(); }, [abierto]);
   useEffect(() => {
     const tecla = (e: KeyboardEvent) => e.key === "Escape" && setAbierto(false);

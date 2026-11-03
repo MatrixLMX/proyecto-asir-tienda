@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Banknote, CreditCard, Minus, PackageSearch, Plus, Printer, ScanBarcode, Search, ShoppingBag, Smartphone, Trash2, X } from "lucide-react";
+import { Banknote, CreditCard, Minus, PackagePlus, PackageSearch, Plus, Printer, Search, ShoppingBag, Smartphone, Trash2, X } from "lucide-react";
 import { cantidad, euros, post, type ProductoStock } from "../api";
+import type { PropsPagina } from "../App";
+import { BotonEscanear, useLectorGlobal } from "../escaner";
 import { imprimirTicket } from "../ticket";
-import { Cabecera, Esqueleto, Modal, Vacio, emitirCambio, useAviso, useDatos } from "../ui";
+import { Cabecera, CampoNumero, Esqueleto, Modal, Vacio, emitirCambio, useAviso, useDatos } from "../ui";
+import { CLAVE_CODIGO_NUEVO } from "./Catalogo";
 
 interface Linea { producto: ProductoStock; cantidad: number }
 interface UltimaVenta { id: number; total: number; efectivo?: { entregado: number; cambio: number } }
@@ -18,7 +21,7 @@ const BILLETES = [5, 10, 20, 50];
 // Igual que la base de datos: cada línea se redondea a céntimos
 const importe = (l: Linea) => Math.round(l.cantidad * l.producto.precio_venta * 100) / 100;
 
-export default function Vender() {
+export default function Vender({ usuario, ir }: PropsPagina) {
   const { datos: productos } = useDatos<ProductoStock[]>("/productos");
   const avisar = useAviso();
   const buscador = useRef<HTMLInputElement>(null);
@@ -28,6 +31,7 @@ export default function Vender() {
   const [cobrando, setCobrando] = useState(false);
   const [ticketMovil, setTicketMovil] = useState(false);
   const [ultima, setUltima] = useState<UltimaVenta | null>(null);
+  const [desconocido, setDesconocido] = useState<string | null>(null);
 
   const categorias = useMemo(() => [...new Set((productos ?? []).map((p) => p.categoria))].sort(), [productos]);
   const filtrados = useMemo(() => {
@@ -44,6 +48,7 @@ export default function Vender() {
 
   function añadir(p: ProductoStock) {
     const yaHay = enCarrito(p.id);
+    if (p.stock_actual <= 0) { avisar("error", `${p.producto} está agotado`); return; }
     if (p.unidad_medida === "unidad" && yaHay + 1 > p.stock_actual) {
       avisar("error", `Solo quedan ${cantidad(p.stock_actual, p.unidad_medida)} de ${p.producto}`);
       return;
@@ -53,25 +58,43 @@ export default function Vender() {
       : [...c, { producto: p, cantidad: p.unidad_medida === "kg" ? 0.5 : 1 }]);
   }
 
-  const cambiar = (id: number, n: number) =>
-    setCarrito((c) => c.map((l) => (l.producto.id === id ? { ...l, cantidad: Math.max(0, Math.round(n * 1000) / 1000) } : l)).filter((l) => l.cantidad > 0));
+  // quitarSiCero = false al escribir un peso: mientras se borra el número
+  // la línea se queda (con 0 kg) en vez de desaparecer
+  const cambiar = (id: number, n: number, quitarSiCero = true) =>
+    setCarrito((c) => c.map((l) => (l.producto.id === id ? { ...l, cantidad: Math.max(0, Math.round(n * 1000) / 1000) } : l))
+      .filter((l) => l.cantidad > 0 || (!quitarSiCero && l.producto.id === id)));
 
-  // Lector de código de barras: escribe el código y pulsa Enter
+  /** Código leído por el lector, la cámara o escrito en el buscador. */
+  function porCodigo(codigo: string) {
+    const c = codigo.trim();
+    const p = productos?.find((x) => x.codigo_barras === c);
+    if (p) { añadir(p); setDesconocido(null); return true; }
+    if (/^\d{6,14}$/.test(c)) { setDesconocido(c); return true; }
+    return false;
+  }
+  // Lector USB/Bluetooth aunque el cursor no esté en el buscador
+  useLectorGlobal(porCodigo, !cobrando);
+
   function alPulsarEnter() {
-    const exacto = productos?.find((p) => p.codigo_barras && p.codigo_barras === busqueda.trim());
-    const elegido = exacto ?? (filtrados.length === 1 ? filtrados[0] : null);
-    if (elegido) { añadir(elegido); setBusqueda(""); }
+    if (porCodigo(busqueda)) { setBusqueda(""); return; }
+    if (filtrados.length === 1) { añadir(filtrados[0]); setBusqueda(""); }
+  }
+
+  function crearProducto() {
+    try { sessionStorage.setItem(CLAVE_CODIGO_NUEVO, desconocido ?? ""); } catch { /* sin almacenamiento */ }
+    setDesconocido(null);
+    ir("catalogo");
   }
 
   // Atajos de teclado: F2 cobrar, F4 buscar
   useEffect(() => {
     const tecla = (e: KeyboardEvent) => {
-      if (e.key === "F2" && carrito.length && !cobrando) { e.preventDefault(); setCobrando(true); }
+      if (e.key === "F2" && carrito.length && carrito.every((l) => l.cantidad > 0) && !cobrando) { e.preventDefault(); setCobrando(true); }
       if (e.key === "F4") { e.preventDefault(); buscador.current?.focus(); buscador.current?.select(); }
     };
     window.addEventListener("keydown", tecla);
     return () => window.removeEventListener("keydown", tecla);
-  }, [carrito.length, cobrando]);
+  }, [carrito, cobrando]);
 
   const imprimir = (v: UltimaVenta) => imprimirTicket(v.id, v.efectivo).catch((e) => avisar("error", e.message));
 
@@ -102,14 +125,15 @@ export default function Vender() {
 
   return (
     <>
-      <Cabecera titulo="Vender" subtitulo="Toca un producto o escanea su código de barras">
+      <Cabecera titulo="Vender" subtitulo="Toca un producto o escanea su código de barras (lector o cámara)">
         <p className="hidden gap-3 text-xs text-tenue lg:flex">
           <span><kbd className="tecla">F4</kbd> buscar</span><span><kbd className="tecla">F2</kbd> cobrar</span><span><kbd className="tecla">Esc</kbd> cerrar</span>
         </p>
       </Cabecera>
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
         <div className="min-w-0">
-          <div className="relative mb-3">
+          <div className="mb-3 flex gap-2">
+            <div className="relative flex-1">
             <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-tenue" />
             <input
               ref={buscador}
@@ -120,10 +144,20 @@ export default function Vender() {
               onKeyDown={(e) => e.key === "Enter" && alPulsarEnter()}
               autoFocus
             />
-            {busqueda ? (
+            {busqueda && (
               <button className="absolute right-3 top-1/2 -translate-y-1/2 text-tenue hover:text-texto" onClick={() => setBusqueda("")} aria-label="Borrar búsqueda"><X className="size-4" /></button>
-            ) : <ScanBarcode className="absolute right-3.5 top-1/2 size-4 -translate-y-1/2 text-tenue" />}
+            )}
+            </div>
+            <BotonEscanear alLeer={porCodigo} className="boton-sec shrink-0 px-4" />
           </div>
+          {desconocido && (
+            <div className="animar-entrada mb-3 flex flex-wrap items-center gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+              <span className="flex-1">El código <b className="tabular-nums">{desconocido}</b> no está en el catálogo.
+                {usuario.rol !== "admin" && " Avisa al administrador para que lo dé de alta."}</span>
+              {usuario.rol === "admin" && <button className="boton py-1.5" onClick={crearProducto}><PackagePlus className="size-4" /> Crear producto</button>}
+              <button className="text-tenue hover:text-texto" onClick={() => setDesconocido(null)} aria-label="Cerrar aviso"><X className="size-4" /></button>
+            </div>
+          )}
 
           <div className="-mx-1 mb-4 flex gap-2 overflow-x-auto px-1 pb-1">
             {[null, ...categorias].map((c) => (
@@ -167,7 +201,7 @@ export default function Vender() {
                         {euros(p.precio_venta)}
                         {p.unidad_medida === "kg" && <span className="text-xs font-medium text-tenue">/kg</span>}
                       </span>
-                      <span className={`text-[11px] font-medium ${agotado ? "text-rose-500" : p.estado === "BAJO" ? "text-amber-600 dark:text-amber-400" : "text-tenue"}`}>
+                      <span className={`whitespace-nowrap text-[11px] font-medium ${agotado ? "text-rose-500" : p.estado === "BAJO" ? "text-amber-600 dark:text-amber-400" : "text-tenue"}`}>
                         {agotado ? "agotado" : cantidad(p.stock_actual, p.unidad_medida)}
                       </span>
                     </div>
@@ -199,7 +233,7 @@ export default function Vender() {
 }
 
 function Ticket({ carrito, total, cambiar, vaciar, cobrar, ultima, imprimir }: {
-  carrito: Linea[]; total: number; cambiar: (id: number, n: number) => void; vaciar: () => void; cobrar: () => void;
+  carrito: Linea[]; total: number; cambiar: (id: number, n: number, quitarSiCero?: boolean) => void; vaciar: () => void; cobrar: () => void;
   ultima: UltimaVenta | null; imprimir: (v: UltimaVenta) => void;
 }) {
   return (
@@ -221,10 +255,10 @@ function Ticket({ carrito, total, cambiar, vaciar, cobrar, ultima, imprimir }: {
               <div className="mt-2 flex items-center gap-2">
                 {p.unidad_medida === "kg" ? (
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <input
-                      type="number" inputMode="decimal" step="0.005" min="0" value={n} aria-label="Peso en kg"
-                      onChange={(e) => cambiar(p.id, Number(e.target.value))}
-                      className="campo w-20 px-2 py-1 text-center"
+                    <CampoNumero
+                      decimales={3} valor={n} aria-label="Peso en kg" placeholder="0"
+                      alCambiar={(v) => cambiar(p.id, v ?? 0, false)}
+                      className={`campo w-20 px-2 py-1 text-center ${n > p.stock_actual || !n ? "border-rose-500" : ""}`}
                     />
                     <span className="text-xs text-tenue">kg</span>
                     {PESOS.map((w) => (
@@ -251,7 +285,7 @@ function Ticket({ carrito, total, cambiar, vaciar, cobrar, ultima, imprimir }: {
         <span className="text-sm text-suave">Total</span>
         <span className="text-3xl font-bold tracking-tight tabular-nums">{euros(total)}</span>
       </div>
-      <button className="boton w-full py-3.5 text-base" disabled={!carrito.length} onClick={cobrar}>
+      <button className="boton w-full py-3.5 text-base" disabled={!carrito.length || carrito.some((l) => l.cantidad <= 0)} onClick={cobrar}>
         Cobrar <kbd className="tecla hidden border-white/30 bg-white/15 text-white lg:inline">F2</kbd>
       </button>
       {ultima && !carrito.length && (

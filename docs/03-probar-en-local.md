@@ -110,3 +110,5 @@ docker compose up -d --build
 11. **Compras → Qué pedir**: pulsa "Registrar esta compra" y la compra se rellena sola con lo que falta.
 12. **Usuarios**: crea un dependiente nuevo, entra con él y cambia su contraseña (icono de la llave). En **Registro de cambios** aparece todo.
 13. En **Vender**, usa el teclado: **F4** busca, **F2** cobra, **Intro** confirma el cobro.
+14. **Escanear**: en Vender pulsa el botón del código de barras (junto al buscador) y enseña a la cámara un código (por ejemplo, el de una caja de cereales). En `http://localhost:8080` la cámara funciona; desde el móvil hace falta el servidor con HTTPS. Sin cámara, escribe `8410188012092` con el cursor fuera del buscador y pulsa Intro: es lo mismo que hace un lector USB.
+15. Ese código no existe en el catálogo: pulsa **Crear producto**. El nombre llega de Open Food Facts; rellena precio de compra, de venta y stock inicial y mira el beneficio por unidad.

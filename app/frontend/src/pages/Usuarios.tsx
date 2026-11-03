@@ -12,6 +12,7 @@ const ACCIONES: Record<string, { texto: string; color: ColorInsignia }> = {
   borrar_compra: { texto: "Compra borrada", color: "rojo" },
   merma: { texto: "Merma", color: "ambar" },
   cambiar_precio: { texto: "Cambio de precio", color: "azul" },
+  cambiar_coste: { texto: "Coste corregido", color: "azul" },
   alta_producto: { texto: "Producto activado", color: "verde" },
   baja_producto: { texto: "Producto de baja", color: "gris" },
   crear_usuario: { texto: "Usuario creado", color: "verde" },

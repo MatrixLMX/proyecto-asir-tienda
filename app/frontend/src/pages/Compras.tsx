@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { CalendarClock, ClipboardList, Download, PackageCheck, Plus, Trash2, Truck } from "lucide-react";
 import { borrar, cantidad, descargarCsv, euros, fecha, fechaHora, post } from "../api";
-import { Cabecera, Confirmar, Esqueleto, Modal, Pestañas, Vacio, emitirCambio, useAviso, useDatos } from "../ui";
+import { BotonEscanear, useLectorGlobal } from "../escaner";
+import { Cabecera, CampoNumero, Confirmar, Esqueleto, Modal, Pestañas, Vacio, emitirCambio, useAviso, useDatos } from "../ui";
+import { ElegirProveedor } from "./Catalogo";
 
 export interface ProductoAdmin {
   id: number;
@@ -22,8 +24,7 @@ export interface ProductoAdmin {
   dias_aviso_caducidad: number;
   activo: number;
 }
-interface Proveedor { id: number; nombre: string }
-interface Linea { clave: number; producto_id: number; cantidad: number; coste_unitario: number; fecha_caducidad: string }
+interface Linea { clave: number; producto_id: number; cantidad: number | null; coste_unitario: number | null; fecha_caducidad: string }
 
 interface Sugerencia {
   id: number; producto: string; proveedor: string | null; proveedor_id: number | null; unidad_medida: string;
@@ -32,7 +33,7 @@ interface Sugerencia {
 interface Precarga { proveedor: number | ""; lineas: Linea[] }
 
 let siguiente = 0;
-const lineaVacia = (): Linea => ({ clave: siguiente++, producto_id: 0, cantidad: 1, coste_unitario: 0, fecha_caducidad: "" });
+const lineaVacia = (): Linea => ({ clave: siguiente++, producto_id: 0, cantidad: 1, coste_unitario: null, fecha_caducidad: "" });
 
 type Vista = "nueva" | "pedido" | "historial";
 
@@ -59,7 +60,7 @@ export default function Compras() {
 
 function NuevaCompra({ inicial }: { inicial: Precarga | null }) {
   const productos = useDatos<ProductoAdmin[]>("/productos/admin");
-  const proveedores = useDatos<Proveedor[]>("/proveedores");
+  const proveedores = useDatos<{ id: number; nombre: string }[]>("/proveedores");
   const avisar = useAviso();
   const [proveedor, setProveedor] = useState<number | "">(inicial?.proveedor ?? "");
   const [factura, setFactura] = useState("");
@@ -71,9 +72,30 @@ function NuevaCompra({ inicial }: { inicial: Precarga | null }) {
   const lista = (productos.datos ?? [])
     .filter((p) => p.activo)
     .sort((a, b) => Number(b.proveedor_id === proveedor) - Number(a.proveedor_id === proveedor) || a.nombre.localeCompare(b.nombre, "es"));
-  const validas = lineas.filter((l) => l.producto_id && l.cantidad > 0);
-  const total = validas.reduce((s, l) => s + l.cantidad * l.coste_unitario, 0);
+  const validas = lineas.filter((l) => l.producto_id && (l.cantidad ?? 0) > 0);
+  const subtotal = (l: Linea) => (l.cantidad ?? 0) * (l.coste_unitario ?? 0);
+  const total = validas.reduce((s, l) => s + subtotal(l), 0);
   const editar = (clave: number, cambio: Partial<Linea>) => setLineas((ls) => ls.map((l) => (l.clave === clave ? { ...l, ...cambio } : l)));
+  const conCoste = (id: number): Partial<Linea> => {
+    const np = prod(id);
+    return { producto_id: id, coste_unitario: np ? Number(np.coste_medio.toFixed(2)) : null, fecha_caducidad: "" };
+  };
+
+  // Escanear un producto: suma 1 a su línea o crea una nueva
+  function escaneado(codigo: string) {
+    const p = productos.datos?.find((x) => x.codigo_barras === codigo.trim());
+    if (!p) { avisar("error", `El código ${codigo} no está en el catálogo. Dalo de alta en Catálogo → Producto.`); return; }
+    if (!p.activo) { avisar("error", `${p.nombre} está dado de baja en el catálogo`); return; }
+    setLineas((ls) => {
+      const ya = ls.find((l) => l.producto_id === p.id);
+      if (ya) return ls.map((l) => (l === ya ? { ...l, cantidad: (l.cantidad ?? 0) + 1 } : l));
+      const vacia = ls.find((l) => !l.producto_id);
+      const nueva = { ...lineaVacia(), ...conCoste(p.id) };
+      return vacia ? ls.map((l) => (l === vacia ? { ...nueva, clave: l.clave } : l)) : [...ls, nueva];
+    });
+    avisar("ok", `${p.nombre} añadido a la compra`);
+  }
+  useLectorGlobal(escaneado);
 
   async function guardar() {
     setGuardando(true);
@@ -81,7 +103,7 @@ function NuevaCompra({ inicial }: { inicial: Precarga | null }) {
       const r = await post<{ id: number; total_sin_iva: number }>("/compras", {
         proveedor_id: proveedor || null,
         numero_factura: factura || null,
-        lineas: validas.map(({ clave: _, ...l }) => ({ ...l, fecha_caducidad: l.fecha_caducidad || null })),
+        lineas: validas.map(({ clave: _, ...l }) => ({ ...l, coste_unitario: l.coste_unitario ?? 0, fecha_caducidad: l.fecha_caducidad || null })),
       });
       avisar("ok", `Compra nº ${r.id} guardada (${euros(r.total_sin_iva)} sin IVA). Stock actualizado.`);
       setLineas([lineaVacia()]);
@@ -101,10 +123,7 @@ function NuevaCompra({ inicial }: { inicial: Precarga | null }) {
           <div className="mb-6 grid gap-4 sm:grid-cols-2">
             <div>
               <label className="etiqueta" htmlFor="proveedor">Proveedor</label>
-              <select id="proveedor" className="campo" value={proveedor} onChange={(e) => setProveedor(e.target.value ? Number(e.target.value) : "")}>
-                <option value="">Sin proveedor</option>
-                {proveedores.datos?.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-              </select>
+              <ElegirProveedor id="proveedor" valor={proveedor} alCambiar={setProveedor} vacio="Sin proveedor" />
             </div>
             <div>
               <label className="etiqueta" htmlFor="factura">Nº de factura o albarán</label>
@@ -128,21 +147,18 @@ function NuevaCompra({ inicial }: { inicial: Precarga | null }) {
                   <div className="grid gap-3 sm:grid-cols-[2fr_1fr_1fr_1fr]">
                     <div>
                       <label className="etiqueta">Producto</label>
-                      <select className="campo" value={l.producto_id} onChange={(e) => {
-                        const np = prod(Number(e.target.value));
-                        editar(l.clave, { producto_id: Number(e.target.value), coste_unitario: np ? Number(np.coste_medio.toFixed(2)) : 0, fecha_caducidad: "" });
-                      }}>
+                      <select className="campo" value={l.producto_id} onChange={(e) => editar(l.clave, conCoste(Number(e.target.value)))}>
                         <option value={0}>Elige un producto…</option>
                         {lista.map((x) => <option key={x.id} value={x.id}>{x.nombre}</option>)}
                       </select>
                     </div>
                     <div>
                       <label className="etiqueta">Cantidad {p?.unidad_medida === "kg" ? "(kg)" : "(uds.)"}</label>
-                      <input className="campo" type="number" inputMode="decimal" min="0" step={p?.unidad_medida === "kg" ? "0.001" : "1"} value={l.cantidad} onChange={(e) => editar(l.clave, { cantidad: Number(e.target.value) })} />
+                      <CampoNumero decimales={p?.unidad_medida === "kg" ? 3 : 0} valor={l.cantidad} alCambiar={(n) => editar(l.clave, { cantidad: n })} />
                     </div>
                     <div>
                       <label className="etiqueta">Coste/ud. sin IVA</label>
-                      <input className="campo" type="number" inputMode="decimal" min="0" step="0.01" value={l.coste_unitario} onChange={(e) => editar(l.clave, { coste_unitario: Number(e.target.value) })} />
+                      <CampoNumero decimales={4} valor={l.coste_unitario} alCambiar={(n) => editar(l.clave, { coste_unitario: n })} />
                     </div>
                     <div>
                       <label className="etiqueta">Caducidad</label>
@@ -153,7 +169,7 @@ function NuevaCompra({ inicial }: { inicial: Precarga | null }) {
                     <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-tenue">
                       <span>Stock actual: <b className="text-suave">{cantidad(p.stock_actual, p.unidad_medida)}</b></span>
                       <span>Coste medio: <b className="text-suave">{euros(p.coste_medio)}</b></span>
-                      <span>Subtotal: <b className="text-suave">{euros(l.cantidad * l.coste_unitario)}</b></span>
+                      <span>Subtotal: <b className="text-suave">{euros(subtotal(l))}</b></span>
                       {p.controla_caducidad && !l.fecha_caducidad ? (
                         <span className={`flex items-center gap-1 ${p.vida_util_dias ? "" : "font-medium text-amber-600 dark:text-amber-400"}`}>
                           <CalendarClock className="size-3.5" />
@@ -167,9 +183,13 @@ function NuevaCompra({ inicial }: { inicial: Precarga | null }) {
             })}
           </div>
 
-          <button className="boton-sec mt-3 w-full border-dashed" onClick={() => setLineas((ls) => [...ls, lineaVacia()])}>
-            <Plus className="size-4" /> Añadir línea
-          </button>
+          <div className="mt-3 flex gap-2">
+            <button className="boton-sec flex-1 border-dashed" onClick={() => setLineas((ls) => [...ls, lineaVacia()])}>
+              <Plus className="size-4" /> Añadir línea
+            </button>
+            <BotonEscanear alLeer={escaneado} texto="Escanear" className="boton-sec" />
+          </div>
+          <p className="mt-2 text-xs text-tenue">Con un lector de códigos puedes escanear los productos directamente: cada lectura suma una unidad.</p>
         </div>
 
         <aside className="tarjeta h-fit p-5 xl:sticky xl:top-8">

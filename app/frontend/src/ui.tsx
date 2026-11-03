@@ -1,5 +1,5 @@
 import {
-  createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type ReactNode,
+  createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type InputHTMLAttributes, type ReactNode,
 } from "react";
 import { AlertCircle, CheckCircle2, Info, Monitor, Moon, Sun, TrendingDown, TrendingUp, X } from "lucide-react";
 import { api } from "./api";
@@ -280,5 +280,39 @@ export function Pestañas<T extends string>({ opciones, valor, alCambiar }: {
         </button>
       ))}
     </div>
+  );
+}
+
+/* =====================================================================
+   Campo numérico
+   ===================================================================== */
+
+/** Número escrito como texto: se puede borrar del todo (no se queda un 0
+ *  pegado), admite coma decimal y en el móvil saca el teclado numérico.
+ *  Vacío equivale a null. */
+export function CampoNumero({ valor, alCambiar, decimales = 2, className = "campo", ...resto }: {
+  valor: number | null; alCambiar: (n: number | null) => void; decimales?: number;
+} & Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type">) {
+  const aTexto = (n: number | null) => (n == null ? "" : String(n).replace(".", ","));
+  const leer = (t: string) => {
+    const s = t.trim().replace(",", ".");
+    const n = Number(s);
+    return s === "" || s === "." || Number.isNaN(n) ? null : n;
+  };
+  const [texto, setTexto] = useState(() => aTexto(valor));
+  // Si el valor cambia desde fuera (p. ej. un botón de 0,5 kg), se muestra
+  // (vacío y 0 cuentan igual: así borrar el campo no vuelve a poner un 0)
+  useEffect(() => { if ((leer(texto) ?? 0) !== (valor ?? 0)) setTexto(aTexto(valor)); }, [valor]); // eslint-disable-line react-hooks/exhaustive-deps
+  const patron = decimales ? new RegExp(String.raw`^\d*([.,]\d{0,${decimales}})?$`) : /^\d*$/;
+  return (
+    <input
+      {...resto} type="text" inputMode={decimales ? "decimal" : "numeric"} autoComplete="off" className={className} value={texto}
+      onChange={(e) => {
+        const t = e.target.value.replace(/\s/g, "");
+        if (!patron.test(t)) return;
+        setTexto(t);
+        alCambiar(leer(t));
+      }}
+    />
   );
 }

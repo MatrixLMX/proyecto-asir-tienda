@@ -1,6 +1,12 @@
 """API de la tienda (FastAPI)."""
+import json
+import logging
+import re
+import urllib.request
 from datetime import date
 from typing import Literal
+
+import pymysql
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +32,19 @@ app.add_middleware(
 @app.exception_handler(ErrorNegocio)
 async def _error_negocio(_, exc: ErrorNegocio):
     return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+@app.exception_handler(pymysql.err.IntegrityError)
+async def _error_integridad(_, exc: pymysql.err.IntegrityError):
+    """Mensajes claros para los errores de datos más habituales."""
+    codigo, texto = (exc.args + ("", ""))[:2]
+    if codigo == 1062:
+        que = ("código de barras" if "codigo_barras" in texto else
+               "nombre" if "nombre" in texto or "usuario" in texto else "dato")
+        return JSONResponse(status_code=409, content={"detail": f"Ya existe otro registro con ese {que}."})
+    if codigo in (1451, 1452):
+        return JSONResponse(status_code=400, content={"detail": "Hace referencia a algo que no existe o está en uso."})
+    return JSONResponse(status_code=400, content={"detail": "Datos no válidos."})
 
 
 def _uno(filas: list[dict], que: str) -> dict:
@@ -398,19 +417,82 @@ class NuevoProducto(BaseModel):
     precio_venta: float = Field(ge=0)
     stock_minimo: float = Field(ge=0, default=0)
     controla_caducidad: bool = False
-    vida_util_dias: int | None = None
-    dias_aviso_caducidad: int = 5
+    vida_util_dias: int | None = Field(default=None, ge=0)
+    dias_aviso_caducidad: int = Field(default=5, ge=0, le=255)
+    # Opcionales: lo que cuesta (sin IVA) y lo que ya hay en la tienda
+    coste_compra: float | None = Field(default=None, ge=0)
+    stock_inicial: float | None = Field(default=None, ge=0)
+    fecha_caducidad: date | None = None
 
 
 @app.post("/api/productos")
 def crear_producto(p: NuevoProducto, u: Usuario = Depends(solo_admin)):
-    datos = p.model_dump()
+    """Da de alta un producto. Si se indica el stock que ya hay, se
+    registra como una compra de "stock inicial" (así entran el coste
+    medio y, si caduca, el lote) en la misma transacción."""
+    datos = p.model_dump(exclude={"coste_compra", "stock_inicial", "fecha_caducidad"})
     datos["codigo_barras"] = (datos["codigo_barras"] or "").strip() or None
+    datos["vida_util_dias"] = datos["vida_util_dias"] or None
+    datos["coste_medio"] = p.coste_compra or 0
     columnas = ", ".join(datos)
     marcas = ", ".join(f"%({k})s" for k in datos)
     with conexion("admin", u.usuario) as con, con.cursor() as cur:
         cur.execute(f"INSERT INTO productos ({columnas}) VALUES ({marcas})", datos)
-        return {"id": cur.lastrowid}
+        producto_id = cur.lastrowid
+        compra_id = None
+        if p.stock_inicial:
+            cur.execute(
+                "INSERT INTO compras (proveedor_id, notas, usuario) VALUES (%s, %s, %s)",
+                (p.proveedor_id, f"Stock inicial al dar de alta: {p.nombre}", u.usuario),
+            )
+            compra_id = cur.lastrowid
+            cur.execute(
+                "INSERT INTO lineas_compra (compra_id, producto_id, cantidad, coste_unitario, fecha_caducidad) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (compra_id, producto_id, p.stock_inicial, p.coste_compra or 0, p.fecha_caducidad),
+            )
+        return {"id": producto_id, "compra_id": compra_id}
+
+
+_EAN = re.compile(r"^\d{6,14}$")
+log = logging.getLogger("tienda")
+
+
+def _buscar_off(codigo: str) -> dict | None:
+    url = (f"https://world.openfoodfacts.org/api/v2/product/{codigo}.json"
+           "?fields=product_name_es,product_name,generic_name_es,brands,quantity,categories")
+    req = urllib.request.Request(url, headers={"User-Agent": "TiendaASIR/1.0 (proyecto educativo)"})
+    try:
+        with urllib.request.urlopen(req, timeout=6) as r:
+            datos = json.load(r)
+    except Exception as e:  # sin internet, 404, tiempo agotado...
+        log.info("Open Food Facts no disponible para %s: %s", codigo, e)
+        return None
+    if datos.get("status") != 1:
+        return None
+    pr = datos.get("product", {})
+    return {
+        "nombre": (pr.get("product_name_es") or pr.get("product_name") or pr.get("generic_name_es") or "").strip(),
+        # "KELLOGG ESPAÑA S.L." -> "KELLOGG ESPAÑA"
+        "marca": re.sub(r"[\s,]+S\.?\s?[AL]\.?(U\.?)?$", "", (pr.get("brands") or "").split(",")[0].strip(), flags=re.I),
+        "cantidad": (pr.get("quantity") or "").strip(),
+        "categorias": (pr.get("categories") or "").strip(),
+    }
+
+
+@app.get("/api/codigo/{codigo}")
+async def consultar_codigo(codigo: str, u: Usuario = Depends(solo_admin)):
+    """Qué se sabe de un código de barras: si ya está en el catálogo y,
+    si no, lo que diga la base de datos abierta Open Food Facts (nombre,
+    marca y tamaño). Precio, coste, IVA, stock y caducidad no salen nunca
+    del código: los pone la tienda."""
+    codigo = codigo.strip()
+    if not _EAN.match(codigo):
+        raise HTTPException(400, "El código debe tener entre 6 y 14 números")
+    existe = consultar("admin", "SELECT id, nombre, activo FROM productos WHERE codigo_barras = %s", (codigo,))
+    if existe:
+        return {"codigo": codigo, "en_catalogo": existe[0], "externo": None}
+    return {"codigo": codigo, "en_catalogo": None, "externo": await run_in_threadpool(_buscar_off, codigo)}
 
 
 class CambioProducto(BaseModel):
@@ -424,6 +506,7 @@ class CambioProducto(BaseModel):
     controla_caducidad: bool | None = None
     vida_util_dias: int | None = Field(default=None, ge=0)
     dias_aviso_caducidad: int | None = Field(default=None, ge=0, le=255)
+    coste_medio: float | None = Field(default=None, ge=0)
     activo: bool | None = None
 
 
@@ -433,14 +516,25 @@ def modificar_producto(producto_id: int, c: CambioProducto, u: Usuario = Depends
     # null se borra (p. ej. quitar el proveedor o el código de barras)
     cambios = c.model_dump(exclude_unset=True)
     for obligatorio in ("nombre", "categoria_id", "iva_id", "precio_venta", "stock_minimo",
-                        "controla_caducidad", "dias_aviso_caducidad", "activo"):
+                        "controla_caducidad", "dias_aviso_caducidad", "activo", "coste_medio"):
         if obligatorio in cambios and cambios[obligatorio] is None:
             del cambios[obligatorio]
     if "codigo_barras" in cambios:
         cambios["codigo_barras"] = (cambios["codigo_barras"] or "").strip() or None
     if cambios.get("vida_util_dias") == 0:
         cambios["vida_util_dias"] = None
-    return _actualizar("productos", producto_id, cambios, u)
+    resultado = _actualizar("productos", producto_id, cambios, u)
+    if "coste_medio" in cambios:
+        # El coste medio lo recalculan las compras; si se corrige a mano
+        # se apunta (las ventas ya hechas guardan su coste y no cambian)
+        consultar(
+            "admin",
+            "INSERT INTO auditoria (usuario, accion, tabla, registro_id, detalle) "
+            "SELECT %s, 'cambiar_coste', 'productos', id, CONCAT(nombre, ': coste ', fmt_euros(coste_medio)) "
+            "FROM productos WHERE id = %s",
+            (u.usuario, producto_id),
+        )
+    return resultado
 
 
 # ---------------------------------------------------------------------
