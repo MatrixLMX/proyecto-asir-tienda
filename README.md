@@ -60,6 +60,7 @@ docker-compose.yml   entorno completo para probar en local
 3. [Probar en local sin máquina virtual](docs/03-probar-en-local.md): con Docker Desktop o con MariaDB en Windows, y pruebas automáticas.
 4. [Manual de usuario](docs/04-manual-usuario.md): cómo se usa la web en la tienda.
 5. [Plan de recuperación ante desastres](docs/05-plan-recuperacion.md): qué hacer si falla el servidor.
+6. [Publicar en Internet](docs/06-produccion-oracle.md): Oracle Cloud, subdominio gratuito, HTTPS y copias.
 
 ## Prueba rápida
 
