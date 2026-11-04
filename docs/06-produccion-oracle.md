@@ -39,7 +39,7 @@ no se pueden alcanzar desde Internet. No se cargan los datos de ejemplo.
 ## 3. Instalar la aplicación
 
 Desde PowerShell en tu PC. Si SSH se queja de los permisos de la clave, ejecuta antes
-`icacls C:\ruta\clave-oracle.key /inheritance:r /grant:r "$($env:USERNAME):R"`.
+`icacls C:utaave-oracle.key /inheritance:r /grant:r "$($env:USERNAME):R"`.
 
 ```powershell
 ssh -i C:\ruta\clave-oracle.key ubuntu@IP-PUBLICA
