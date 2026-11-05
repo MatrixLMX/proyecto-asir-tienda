@@ -1,0 +1,15 @@
+# Versión de la tienda para Cloudflare Workers + D1 (SQLite).
+name = "tienda"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[assets]
+directory = "../app/frontend/dist"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tienda"
+database_id = "00000000-0000-0000-0000-000000000000" # el real lo da "wrangler d1 create tienda"
+migrations_dir = "migrations"

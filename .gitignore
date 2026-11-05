@@ -22,3 +22,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.tsbuildinfo
+
+# Cloudflare
+.wrangler/
+.dev.vars
