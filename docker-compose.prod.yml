@@ -1,0 +1,92 @@
+# Producción en un servidor con IP pública (Oracle Cloud u otro):
+#   sudo bash scripts/produccion/instalar.sh
+#
+# Desde Internet solo se ven los puertos 80 y 443, los de Caddy. La API y
+# MariaDB quedan en la red interna de Docker. A diferencia de
+# docker-compose.yml, no carga los datos de ejemplo ni sus contraseñas.
+name: tienda
+
+x-registros: &registros
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  db:
+    image: mariadb:11.8
+    restart: unless-stopped
+    <<: *registros
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?Falta en .env}
+      DB_ADMIN_PASSWORD: ${DB_ADMIN_PASSWORD:?Falta en .env}
+      DB_DEPENDIENTE_PASSWORD: ${DB_DEPENDIENTE_PASSWORD:?Falta en .env}
+      DB_AUTH_PASSWORD: ${DB_AUTH_PASSWORD:?Falta en .env}
+      DB_HOST_PERMITIDO: "%"   # solo alcanzable desde la red interna de Docker
+      TZ: Europe/Madrid
+    volumes:
+      - ./sql/01_esquema.sql:/docker-entrypoint-initdb.d/01_esquema.sql:ro
+      - ./sql/02_triggers.sql:/docker-entrypoint-initdb.d/02_triggers.sql:ro
+      - ./sql/03_vistas.sql:/docker-entrypoint-initdb.d/03_vistas.sql:ro
+      - ./sql/04_roles.sql:/docker-entrypoint-initdb.d/04_roles.sql:ro
+      - ./sql/05_usuarios.sh:/docker-entrypoint-initdb.d/05_usuarios.sh:ro
+      - ./sql/06_datos_base.sql:/docker-entrypoint-initdb.d/06_datos_base.sql:ro
+      - datos-bd:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      retries: 30
+
+  backend:
+    build: ./app/backend
+    restart: unless-stopped
+    <<: *registros
+    # Cada servicio recibe solo sus secretos: la API no conoce la clave de root
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_ADMIN_PASSWORD: ${DB_ADMIN_PASSWORD}
+      DB_DEPENDIENTE_PASSWORD: ${DB_DEPENDIENTE_PASSWORD}
+      DB_AUTH_PASSWORD: ${DB_AUTH_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?Falta en .env}
+      LLM_PROVIDER: ${LLM_PROVIDER:-google_genai}
+      LLM_MODEL: ${LLM_MODEL:-gemini-flash-lite-latest}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      NOMBRE_TIENDA: ${NOMBRE_TIENDA:-Mi Tienda}
+      NIF_TIENDA: ${NIF_TIENDA:-}
+      DIRECCION_TIENDA: ${DIRECCION_TIENDA:-}
+      CORS_ORIGINS: https://${DOMINIO:?Falta en .env}
+      TZ: Europe/Madrid
+      # La API solo es alcanzable por nginx. Caddy descarta la cabecera que
+      # mande el cliente, así que la IP del límite de login no se puede falsear.
+      FORWARDED_ALLOW_IPS: "*"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./app/frontend
+    restart: unless-stopped
+    <<: *registros
+    depends_on:
+      - backend
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    <<: *registros
+    environment:
+      DOMINIO: ${DOMINIO}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-datos:/data     # certificados: conservarlos evita pedirlos de nuevo
+      - caddy-config:/config
+    depends_on:
+      - frontend
+
+volumes:
+  datos-bd:
+  caddy-datos:
+  caddy-config:
