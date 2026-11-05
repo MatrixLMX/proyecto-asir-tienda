@@ -20,10 +20,15 @@ paso() { echo -e "\n\e[1;32m==> $*\e[0m"; }
 
 # ---------------------------------------------------------------------
 paso "1. Datos de la tienda"
+IP_PUBLICA="$(curl -4fsS --max-time 10 https://api.ipify.org || true)"
 if [[ -f "$ENV" ]]; then
   echo "Ya existe $ENV: se conserva."
 else
-  read -rp "Dirección web (ej: mitienda.duckdns.org): " DOMINIO
+  # Sin dominio propio: sslip.io convierte 1-2-3-4.sslip.io en la IP 1.2.3.4
+  POR_DEFECTO=""
+  [[ -n "$IP_PUBLICA" ]] && POR_DEFECTO="${IP_PUBLICA//./-}.sslip.io"
+  read -rp "Dirección web (Intro para usar ${POR_DEFECTO:-la tuya}): " DOMINIO
+  DOMINIO="${DOMINIO:-$POR_DEFECTO}"
   [[ "$DOMINIO" =~ ^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || { echo "Dirección no válida."; exit 1; }
   read -rp "Nombre de la tienda: " NOMBRE
   read -rp "NIF para el ticket (Intro para dejarlo para luego): " NIF
@@ -54,11 +59,10 @@ DOMINIO="$(sed -n 's/^DOMINIO=//p' "$ENV")"
 
 # ---------------------------------------------------------------------
 paso "2. Comprobando que $DOMINIO apunta a este servidor"
-IP_PUBLICA="$(curl -4fsS --max-time 10 https://api.ipify.org || true)"
 IP_DOMINIO="$(getent ahostsv4 "$DOMINIO" | awk 'NR==1{print $1}' || true)"
 echo "IP de este servidor: ${IP_PUBLICA:-desconocida} | IP de $DOMINIO: ${IP_DOMINIO:-ninguna}"
 if [[ -z "$IP_PUBLICA" || "$IP_PUBLICA" != "$IP_DOMINIO" ]]; then
-  echo "No coinciden. Pon la IP del servidor en tu subdominio y repite este script."
+  echo "No coinciden. Corrige DOMINIO en $ENV (o la IP de tu subdominio) y repite este script."
   echo "Sin esto no se puede obtener el certificado HTTPS."
   exit 1
 fi

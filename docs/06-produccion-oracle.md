@@ -1,9 +1,9 @@
-# Publicar la tienda en Internet (Oracle Cloud y subdominio gratuito)
+# Publicar la tienda en Internet (Oracle Cloud, sin dominio propio)
 
 La web queda en un servidor encendido las 24 horas, sin depender de tu PC:
 
 ```
-móvil / PC → https://mitienda.duckdns.org → Caddy (HTTPS) → web y API → MariaDB
+móvil / PC → https://1-2-3-4.sslip.io → Caddy (HTTPS) → web y API → MariaDB
 ```
 
 Solo se abren los puertos 80 y 443 (web) y 22 (SSH con clave). MariaDB y la API
@@ -30,11 +30,15 @@ no se pueden alcanzar desde Internet. No se cargan los datos de ejemplo.
    **Add Ingress Rules** y añade dos reglas con origen `0.0.0.0/0`, protocolo TCP
    y puerto de destino `80` y `443`.
 
-## 2. Crear el subdominio gratuito
+## 2. La dirección web
 
-1. Entra en <https://www.duckdns.org> e inicia sesión.
-2. Crea un subdominio, por ejemplo `mitienda`.
-3. En **current ip** pon la Public IP de Oracle y pulsa **update ip**.
+No hay que registrar nada. La dirección sale de la IP del servidor con
+[sslip.io](https://sslip.io): si la IP es `1.2.3.4`, la web será
+`https://1-2-3-4.sslip.io`. El script te la propone al instalar.
+
+Si más adelante quieres una dirección con nombre, usa un dominio propio o un
+subdominio gratuito (por ejemplo, de DuckDNS), cambia `DOMINIO` en `.env` y
+aplícalo con `sudo docker compose -f docker-compose.prod.yml up -d`.
 
 ## 3. Instalar la aplicación
 
@@ -67,7 +71,7 @@ Cada noche se guarda una copia en `/var/backups/tienda` (se conservan 30 días).
 Bájala a tu PC cada pocos días:
 
 ```powershell
-.\scripts\produccion\descargar_copias.ps1 -Servidor mitienda.duckdns.org -Clave C:\ruta\clave-oracle.key
+.\scripts\produccion\descargar_copias.ps1 -Servidor IP-PUBLICA -Clave C:\ruta\clave-oracle.key
 ```
 
 Guarda también una copia de `/opt/tienda/.env` en un lugar seguro.
@@ -86,8 +90,9 @@ sudo bash /opt/tienda/scripts/produccion/restaurar.sh /var/backups/tienda/COPIA.
 
 ### Si pierdes el servidor
 
-1. Crea otro servidor (paso 1) y actualiza la IP en DuckDNS (paso 2).
-2. Instala (paso 3). Si conservas el `.env`, cópialo a `/opt/tienda/.env` antes.
+1. Crea otro servidor (paso 1). Tendrá otra IP y, por tanto, otra dirección web.
+2. Instala (paso 3). Si conservas el `.env`, cópialo antes a `/opt/tienda/.env`
+   y cambia en él `DOMINIO` por la dirección nueva.
 3. Sube la última copia con `scp` y restáurala con el comando anterior.
 
 ## 5. Mantenimiento
@@ -109,8 +114,12 @@ a mano.
 
 - **Oracle puede reclamar máquinas gratuitas con poco uso** y puede haber caídas
   sin soporte. Por eso son imprescindibles las copias en tu PC.
-- **DuckDNS es un servicio gratuito sin garantías.** Si falla, la web no se
+- **sslip.io es un servicio gratuito sin garantías.** Si falla, la web no se
   encuentra aunque el servidor esté bien.
-- **Si cambia la IP del servidor**, hay que actualizarla en DuckDNS.
+- **Si cambia la IP del servidor, cambia la dirección web.** Actualiza `DOMINIO`
+  en `.env`. Para evitarlo, usa una IP reservada de Oracle.
+- **El certificado HTTPS depende de un dominio compartido.** Si Let's Encrypt lo
+  rechaza por exceso de peticiones, los registros de Caddy lo indican; reintenta
+  más tarde o usa un subdominio de DuckDNS.
 - **Fiscalidad:** antes de cobrar de verdad, confirma con la gestoría el IVA y
   si la aplicación debe adaptarse a Veri\*factu.
