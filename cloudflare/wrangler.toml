@@ -11,5 +11,9 @@ run_worker_first = ["/api/*"]
 [[d1_databases]]
 binding = "DB"
 database_name = "tienda"
-database_id = "00000000-0000-0000-0000-000000000000" # el real lo da "wrangler d1 create tienda"
+database_id = "aa6abc8d-45c4-438a-be9e-da97fb88dd19"
 migrations_dir = "migrations"
+
+# Aviso de la mañana al móvil: a las 8:00 en verano y a las 9:00 en invierno, hora de España
+[triggers]
+crons = ["0 7 * * *"]

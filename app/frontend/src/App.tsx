@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useState, type ComponentType, type FormEvent } from "react";
 import {
-  BarChart3, CalendarClock, KeyRound, LayoutDashboard, LogOut, MoreHorizontal, Package, Receipt, ShoppingCart, Store, Tags, Truck, Users, X,
+  BadgePercent, BarChart3, CalendarClock, ClipboardCheck, HandCoins, KeyRound, LayoutDashboard, LogOut, MoreHorizontal, Package, Receipt, ShoppingCart, Store, Tags, Truck, Users, X,
 } from "lucide-react";
 import { api, post, sesion, type AlertaStock, type Caducidad, type Usuario } from "./api";
 import Asistente from "./Asistente";
@@ -17,6 +17,9 @@ const Catalogo = lazy(() => import("./pages/Catalogo"));
 const Informes = lazy(() => import("./pages/Informes"));
 const Ventas = lazy(() => import("./pages/Ventas"));
 const Usuarios = lazy(() => import("./pages/Usuarios"));
+const Fiado = lazy(() => import("./pages/Fiado"));
+const Ofertas = lazy(() => import("./pages/Ofertas"));
+const Recuento = lazy(() => import("./pages/Recuento"));
 
 export interface PropsPagina { usuario: Usuario; ir: (seccion: string) => void }
 
@@ -35,13 +38,16 @@ const SECCIONES: Seccion[] = [
   { id: "stock", nombre: "Stock", icono: Package, pagina: Stock, movil: true },
   { id: "caducidades", nombre: "Caducidades", icono: CalendarClock, pagina: Caducidades, movil: true },
   { id: "ventas", nombre: "Ventas y caja", icono: Receipt, pagina: Ventas },
+  { id: "fiado", nombre: "Fiado", icono: HandCoins, pagina: Fiado },
   { id: "compras", nombre: "Compras", icono: Truck, pagina: Compras, soloAdmin: true },
   { id: "catalogo", nombre: "Catálogo", icono: Tags, pagina: Catalogo, soloAdmin: true },
+  { id: "ofertas", nombre: "Ofertas", icono: BadgePercent, pagina: Ofertas, soloAdmin: true },
+  { id: "recuento", nombre: "Recuento", icono: ClipboardCheck, pagina: Recuento, soloAdmin: true },
   { id: "informes", nombre: "Beneficios", icono: BarChart3, pagina: Informes, soloAdmin: true },
   { id: "usuarios", nombre: "Usuarios", icono: Users, pagina: Usuarios, soloAdmin: true },
 ];
 
-const leerSeccion = () => window.location.hash.slice(1) || "inicio";
+const leerSeccion = () => window.location.hash.slice(1).split("/")[0] || "inicio";
 
 export default function App() {
   return (

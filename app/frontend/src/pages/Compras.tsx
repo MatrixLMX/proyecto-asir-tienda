@@ -23,6 +23,9 @@ export interface ProductoAdmin {
   vida_util_dias: number | null;
   dias_aviso_caducidad: number;
   activo: number;
+  control_stock: number;
+  precio_libre: number;
+  acceso_rapido: number;
 }
 interface Linea { clave: number; producto_id: number; cantidad: number | null; coste_unitario: number | null; fecha_caducidad: string }
 
@@ -38,7 +41,7 @@ const lineaVacia = (): Linea => ({ clave: siguiente++, producto_id: 0, cantidad:
 type Vista = "nueva" | "pedido" | "historial";
 
 export default function Compras() {
-  const [vista, setVista] = useState<Vista>("nueva");
+  const [vista, setVista] = useState<Vista>(() => (window.location.hash === "#compras/pedido" ? "pedido" : "nueva"));
   const [precarga, setPrecarga] = useState<Precarga | null>(null);
   const [version, setVersion] = useState(0);
 

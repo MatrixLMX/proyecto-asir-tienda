@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { CalendarClock, PartyPopper, Trash2 } from "lucide-react";
 import { cantidad, fecha, post, type Caducidad } from "../api";
+import { AvisosMovil } from "../avisos";
 import { Cabecera, Confirmar, Esqueleto, Insignia, Pestañas, Vacio, emitirCambio, useAviso, useDatos } from "../ui";
 
 type Filtro = "todos" | "caducados" | "proximos";
@@ -28,6 +29,7 @@ export default function Caducidades() {
   return (
     <>
       <Cabecera titulo="Caducidades" subtitulo="Solo aparece lo caducado o lo que caduca pronto. No hace falta revisar producto por producto." />
+      <AvisosMovil />
 
       {datos && datos.length > 0 && (
         <div className="mb-5">

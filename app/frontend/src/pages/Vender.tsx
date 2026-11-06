@@ -1,33 +1,47 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Banknote, CreditCard, Minus, PackagePlus, PackageSearch, Plus, Printer, Search, ShoppingBag, Smartphone, Split, Star, Trash2, X } from "lucide-react";
-import { cantidad, euros, post, type FormaPago, type ProductoStock } from "../api";
+import { BadgePercent, Banknote, CreditCard, HandCoins, Minus, PackagePlus, PackageSearch, Plus, Printer, Search, Share2, ShoppingBag, Smartphone, Split, Star, Trash2, X, Zap } from "lucide-react";
+import { cantidad, euros, post, type FormaPago, type Oferta, type ProductoStock } from "../api";
 import type { PropsPagina } from "../App";
 import { BotonEscanear, useLectorGlobal } from "../escaner";
-import { imprimirTicket } from "../ticket";
+import { compartirTicket, imprimirTicket } from "../ticket";
 import { Cabecera, CampoNumero, Esqueleto, Modal, Vacio, emitirCambio, useAviso, useDatos } from "../ui";
 import { CLAVE_CODIGO_NUEVO } from "./Catalogo";
+import { ElegirCliente } from "./Fiado";
 
-interface Linea { producto: ProductoStock; cantidad: number }
+// "libre": el importe de esta línea, en productos de precio libre (chuches a granel)
+interface Linea { producto: ProductoStock; cantidad: number; libre?: number }
 interface UltimaVenta { id: number; total: number; efectivo?: { entregado: number; cambio: number } }
-type Pago = FormaPago | "mixto";
+type Pago = FormaPago | "mixto" | "fiado";
+type Parte = FormaPago | "fiado";
 
 const PAGOS = [
   { id: "efectivo", nombre: "Efectivo", icono: Banknote },
   { id: "tarjeta", nombre: "Tarjeta", icono: CreditCard },
   { id: "bizum", nombre: "Bizum", icono: Smartphone },
+  { id: "fiado", nombre: "Fiado", icono: HandCoins },
   { id: "mixto", nombre: "Mixto", icono: Split },
 ] as const;
 const MAS_VENDIDOS = "__mas_vendidos";
 const PESOS = [0.25, 0.5, 1, 2];
 const BILLETES = [5, 10, 20, 50];
+const sinStock = (p: ProductoStock) => !p.control_stock;
+
+/** Igual que el servidor, que es quien decide: la mejor oferta a la que llega la cantidad. */
+function precioDe(l: Linea, ofertas: Oferta[]) {
+  if (l.libre != null) return l.libre;
+  return ofertas.filter((o) => o.producto_id === l.producto.id && o.activa && l.cantidad >= o.cantidad_minima)
+    .reduce((p, o) => Math.min(p, o.precio), l.producto.precio_venta);
+}
 // Igual que la base de datos: cada línea se redondea a céntimos
-const importe = (l: Linea) => Math.round(l.cantidad * l.producto.precio_venta * 100) / 100;
+const importe = (l: Linea, ofertas: Oferta[]) => Math.round(l.cantidad * precioDe(l, ofertas) * 100) / 100;
 
 export default function Vender({ usuario, ir }: PropsPagina) {
   const { datos: productos } = useDatos<ProductoStock[]>("/productos");
   // Se cargan una vez por visita: si se reordenaran tras cada venta, los
   // botones cambiarían de sitio mientras se cobra
   const { datos: masVendidos } = useDatos<number[]>("/productos/mas-vendidos", false);
+  const { datos: datosOfertas } = useDatos<Oferta[]>("/ofertas");
+  const ofertas = datosOfertas ?? [];
   const avisar = useAviso();
   const buscador = useRef<HTMLInputElement>(null);
   const [busqueda, setBusqueda] = useState("");
@@ -37,6 +51,8 @@ export default function Vender({ usuario, ir }: PropsPagina) {
   const [ticketMovil, setTicketMovil] = useState(false);
   const [ultima, setUltima] = useState<UltimaVenta | null>(null);
   const [desconocido, setDesconocido] = useState<string | null>(null);
+  const [pidiendoPrecio, setPidiendoPrecio] = useState<ProductoStock | null>(null);
+  const rapidos = useMemo(() => (productos ?? []).filter((p) => p.acceso_rapido), [productos]);
 
   const categorias = useMemo(() => [...new Set((productos ?? []).map((p) => p.categoria))].sort(), [productos]);
   const destacados = useMemo(() => (masVendidos ?? [])
@@ -53,20 +69,29 @@ export default function Vender({ usuario, ir }: PropsPagina) {
     );
   }, [productos, busqueda, filtro, destacados]);
 
-  const total = carrito.reduce((s, l) => s + importe(l), 0);
+  const total = Math.round(carrito.reduce((s, l) => s + importe(l, ofertas), 0) * 100) / 100;
   const articulos = carrito.reduce((s, l) => s + (l.producto.unidad_medida === "kg" ? 1 : l.cantidad), 0);
   const enCarrito = (id: number) => carrito.find((l) => l.producto.id === id)?.cantidad ?? 0;
 
   function añadir(p: ProductoStock) {
+    if (p.precio_libre) { setPidiendoPrecio(p); return; }
     const yaHay = enCarrito(p.id);
-    if (p.stock_actual <= 0) { avisar("error", `${p.producto} está agotado`); return; }
-    if (p.unidad_medida === "unidad" && yaHay + 1 > p.stock_actual) {
+    if (!sinStock(p) && p.stock_actual <= 0) { avisar("error", `${p.producto} está agotado`); return; }
+    if (!sinStock(p) && p.unidad_medida === "unidad" && yaHay + 1 > p.stock_actual) {
       avisar("error", `Solo quedan ${cantidad(p.stock_actual, p.unidad_medida)} de ${p.producto}`);
       return;
     }
     setCarrito((c) => yaHay
       ? c.map((l) => (l.producto.id === p.id && p.unidad_medida === "unidad" ? { ...l, cantidad: l.cantidad + 1 } : l))
       : [...c, { producto: p, cantidad: p.unidad_medida === "kg" ? 0.5 : 1 }]);
+  }
+
+  /** Precio libre: otra compra del mismo producto se suma a lo que ya llevaba. */
+  function añadirLibre(p: ProductoStock, euros: number) {
+    setCarrito((c) => c.some((l) => l.producto.id === p.id)
+      ? c.map((l) => (l.producto.id === p.id ? { ...l, libre: Math.round(((l.libre ?? 0) + euros) * 100) / 100 } : l))
+      : [...c, { producto: p, cantidad: 1, libre: euros }]);
+    setPidiendoPrecio(null);
   }
 
   // quitarSiCero = false al escribir un peso: mientras se borra el número
@@ -84,7 +109,7 @@ export default function Vender({ usuario, ir }: PropsPagina) {
     return false;
   }
   // Lector USB/Bluetooth aunque el cursor no esté en el buscador
-  useLectorGlobal(porCodigo, !cobrando);
+  useLectorGlobal(porCodigo, !cobrando && !pidiendoPrecio);
 
   function alPulsarEnter() {
     if (porCodigo(busqueda)) { setBusqueda(""); return; }
@@ -109,15 +134,20 @@ export default function Vender({ usuario, ir }: PropsPagina) {
 
   const imprimir = (v: UltimaVenta) => imprimirTicket(v.id, v.efectivo).catch((e) => avisar("error", e.message));
 
-  async function confirmarVenta({ pago, entregado, tarjeta = 0, bizum = 0 }: DatosCobro) {
+  const compartir = (v: UltimaVenta) => compartirTicket(v.id)
+    .then((r) => { if (r === "copiado") avisar("ok", "Ticket copiado: pégalo donde quieras enviarlo"); })
+    .catch((e) => avisar("error", e.message));
+
+  async function confirmarVenta({ pago, entregado, tarjeta = 0, bizum = 0, fiado = 0, cliente }: DatosCobro) {
     try {
       const r = await post<{ id: number; total: number }>("/ventas", {
         metodo_pago: pago,
-        ...(pago === "mixto" ? { pago_tarjeta: tarjeta, pago_bizum: bizum } : {}),
-        lineas: carrito.map((l) => ({ producto_id: l.producto.id, cantidad: l.cantidad })),
+        ...(pago === "mixto" ? { pago_tarjeta: tarjeta, pago_bizum: bizum, pago_fiado: fiado } : {}),
+        ...(cliente ? { cliente_id: cliente } : {}),
+        lineas: carrito.map((l) => ({ producto_id: l.producto.id, cantidad: l.cantidad, ...(l.libre != null ? { precio: l.libre } : {}) })),
       });
-      // Efectivo que había que cobrar (en un mixto, lo que no va a tarjeta ni Bizum)
-      const enEfectivo = pago === "mixto" ? r.total - tarjeta - bizum : r.total;
+      // Efectivo que había que cobrar (en un mixto, lo que no va por otro lado)
+      const enEfectivo = pago === "mixto" ? r.total - tarjeta - bizum - fiado : r.total;
       const cambio = entregado != null ? Math.round((entregado - enEfectivo) * 100) / 100 : null;
       setUltima({ id: r.id, total: r.total, ...(entregado != null ? { efectivo: { entregado, cambio: cambio ?? 0 } } : {}) });
       avisar("ok", `Venta nº ${r.id}: ${euros(r.total)}${cambio ? ` · cambio ${euros(cambio)}` : ""}`);
@@ -134,7 +164,7 @@ export default function Vender({ usuario, ir }: PropsPagina) {
 
   const ticket = (
     <Ticket carrito={carrito} total={total} cambiar={cambiar} vaciar={() => setCarrito([])} cobrar={() => setCobrando(true)}
-      ultima={ultima} imprimir={imprimir} />
+      ultima={ultima} imprimir={imprimir} compartir={compartir} ofertas={ofertas} />
   );
 
   return (
@@ -173,6 +203,17 @@ export default function Vender({ usuario, ir }: PropsPagina) {
             </div>
           )}
 
+          {rapidos.length > 0 && !busqueda && (
+            <div className="mb-3 flex flex-wrap gap-2" aria-label="Acceso rápido">
+              {rapidos.map((p) => (
+                <button key={p.id} onClick={() => añadir(p)} className="inline-flex items-center gap-1.5 rounded-xl border border-marca-500/50 bg-marca-suave px-3.5 py-2.5 text-sm font-semibold text-marca-fuerte transition active:scale-95">
+                  <Zap className="size-3.5" /> {p.producto}
+                  {!p.precio_libre && <span className="font-medium tabular-nums opacity-80">{euros(p.precio_venta)}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="-mx-1 mb-4 flex gap-2 overflow-x-auto px-1 pb-1">
             {[...(destacados.length ? [MAS_VENDIDOS] : []), null, ...categorias].map((c) => (
               <button
@@ -193,7 +234,8 @@ export default function Vender({ usuario, ir }: PropsPagina) {
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
               {filtrados.map((p) => {
                 const n = enCarrito(p.id);
-                const agotado = p.stock_actual <= 0;
+                const agotado = !sinStock(p) && p.stock_actual <= 0;
+                const oferta = ofertas.filter((o) => o.producto_id === p.id && o.activa && o.precio < p.precio_venta).sort((a, b) => a.cantidad_minima - b.cantidad_minima)[0];
                 return (
                   <button
                     key={p.id}
@@ -212,13 +254,18 @@ export default function Vender({ usuario, ir }: PropsPagina) {
                     <span className="mt-1 line-clamp-2 pr-6 text-sm font-semibold leading-snug">{p.producto}</span>
                     <div className="mt-auto flex w-full items-end justify-between pt-3">
                       <span className="text-lg font-bold tabular-nums text-marca-fuerte">
-                        {euros(p.precio_venta)}
+                        {p.precio_libre ? <span className="text-sm">Precio libre</span> : euros(p.precio_venta)}
                         {p.unidad_medida === "kg" && <span className="text-xs font-medium text-tenue">/kg</span>}
                       </span>
                       <span className={`whitespace-nowrap text-[11px] font-medium ${agotado ? "text-rose-500" : p.estado === "BAJO" ? "text-amber-600 dark:text-amber-400" : "text-tenue"}`}>
-                        {agotado ? "agotado" : cantidad(p.stock_actual, p.unidad_medida)}
+                        {agotado ? "agotado" : sinStock(p) ? "" : cantidad(p.stock_actual, p.unidad_medida)}
                       </span>
                     </div>
+                    {oferta && (
+                      <span className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+                        <BadgePercent className="size-3" /> {oferta.cantidad_minima}+ a {euros(oferta.precio)}
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -242,13 +289,34 @@ export default function Vender({ usuario, ir }: PropsPagina) {
       <Modal abierto={ticketMovil} alCerrar={() => setTicketMovil(false)} titulo="Ticket">{ticket}</Modal>
 
       <Cobro abierto={cobrando} total={total} alCerrar={() => setCobrando(false)} alConfirmar={confirmarVenta} />
+      <PedirPrecio producto={pidiendoPrecio} alCerrar={() => setPidiendoPrecio(null)} alConfirmar={añadirLibre} />
     </>
   );
 }
 
-function Ticket({ carrito, total, cambiar, vaciar, cobrar, ultima, imprimir }: {
+function PedirPrecio({ producto, alCerrar, alConfirmar }: { producto: ProductoStock | null; alCerrar: () => void; alConfirmar: (p: ProductoStock, euros: number) => void }) {
+  const [valor, setValor] = useState<number | null>(null);
+  useEffect(() => { if (producto) setValor(null); }, [producto]);
+  const enviar = (e: FormEvent) => { e.preventDefault(); if (producto && valor) alConfirmar(producto, valor); };
+  return (
+    <Modal abierto={!!producto} alCerrar={alCerrar} titulo={producto?.producto ?? ""}>
+      <form onSubmit={enviar} className="space-y-4">
+        <div>
+          <label className="etiqueta" htmlFor="precio-libre">Importe que paga (€)</label>
+          <CampoNumero id="precio-libre" className="campo text-center text-2xl tabular-nums" autoFocus placeholder="0,00" valor={valor} alCambiar={setValor} />
+        </div>
+        <div className="grid grid-cols-4 gap-2">
+          {[0.5, 1, 1.5, 2].map((n) => <button type="button" key={n} className="boton-sec py-2" onClick={() => setValor(n)}>{euros(n)}</button>)}
+        </div>
+        <button className="boton w-full py-3" disabled={!valor}>Añadir al ticket</button>
+      </form>
+    </Modal>
+  );
+}
+
+function Ticket({ carrito, total, cambiar, vaciar, cobrar, ultima, imprimir, compartir, ofertas }: {
   carrito: Linea[]; total: number; cambiar: (id: number, n: number, quitarSiCero?: boolean) => void; vaciar: () => void; cobrar: () => void;
-  ultima: UltimaVenta | null; imprimir: (v: UltimaVenta) => void;
+  ultima: UltimaVenta | null; imprimir: (v: UltimaVenta) => void; compartir: (v: UltimaVenta) => void; ofertas: Oferta[];
 }) {
   return (
     <div className="flex flex-col">
@@ -260,11 +328,16 @@ function Ticket({ carrito, total, cambiar, vaciar, cobrar, ultima, imprimir }: {
         <Vacio icono={<ShoppingBag className="size-6" />} titulo="Ticket vacío">Añade productos para empezar</Vacio>
       ) : (
         <ul className="-mx-1 mb-4 max-h-[50vh] overflow-y-auto px-1">
-          {carrito.map((linea) => { const { producto: p, cantidad: n } = linea; return (
+          {carrito.map((linea) => {
+            const { producto: p, cantidad: n } = linea;
+            const unitario = precioDe(linea, ofertas);
+            const conOferta = linea.libre == null && unitario < p.precio_venta;
+            const siguiente = linea.libre == null && ofertas.filter((o) => o.producto_id === p.id && o.activa && o.cantidad_minima > n && o.precio < unitario).sort((a, b) => a.cantidad_minima - b.cantidad_minima)[0];
+            return (
             <li key={p.id} className="border-b border-borde py-3 last:border-0">
               <div className="flex justify-between gap-2 text-sm">
                 <span className="font-medium">{p.producto}</span>
-                <span className="font-semibold tabular-nums">{euros(importe(linea))}</span>
+                <span className="font-semibold tabular-nums">{euros(importe(linea, ofertas))}</span>
               </div>
               <div className="mt-2 flex items-center gap-2">
                 {p.unidad_medida === "kg" ? (
@@ -272,7 +345,7 @@ function Ticket({ carrito, total, cambiar, vaciar, cobrar, ultima, imprimir }: {
                     <CampoNumero
                       decimales={3} valor={n} aria-label="Peso en kg" placeholder="0"
                       alCambiar={(v) => cambiar(p.id, v ?? 0, false)}
-                      className={`campo w-20 px-2 py-1 text-center ${n > p.stock_actual || !n ? "border-rose-500" : ""}`}
+                      className={`campo w-20 px-2 py-1 text-center ${(!sinStock(p) && n > p.stock_actual) || !n ? "border-rose-500" : ""}`}
                     />
                     <span className="text-xs text-tenue">kg</span>
                     {PESOS.map((w) => (
@@ -281,16 +354,17 @@ function Ticket({ carrito, total, cambiar, vaciar, cobrar, ultima, imprimir }: {
                       </button>
                     ))}
                   </div>
-                ) : (
+                ) : linea.libre != null ? null : (
                   <div className="flex items-center rounded-xl border border-borde">
                     <button className="p-1.5 text-suave hover:text-texto" onClick={() => cambiar(p.id, n - 1)} aria-label="Quitar uno"><Minus className="size-3.5" /></button>
                     <span className="w-8 text-center text-sm font-semibold tabular-nums">{n}</span>
-                    <button className="p-1.5 text-suave hover:text-texto disabled:opacity-30" disabled={n >= p.stock_actual} onClick={() => cambiar(p.id, n + 1)} aria-label="Añadir uno"><Plus className="size-3.5" /></button>
+                    <button className="p-1.5 text-suave hover:text-texto disabled:opacity-30" disabled={!sinStock(p) && n >= p.stock_actual} onClick={() => cambiar(p.id, n + 1)} aria-label="Añadir uno"><Plus className="size-3.5" /></button>
                   </div>
                 )}
-                <span className="text-xs text-tenue">× {euros(p.precio_venta)}</span>
+                {linea.libre == null && <span className={`text-xs ${conOferta ? "font-semibold text-amber-700 dark:text-amber-400" : "text-tenue"}`}>× {euros(unitario)}{conOferta ? " oferta" : ""}</span>}
                 <button className="ml-auto text-tenue hover:text-rose-500" onClick={() => cambiar(p.id, 0)} aria-label="Quitar del ticket"><Trash2 className="size-4" /></button>
               </div>
+              {siguiente && <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">Con {siguiente.cantidad_minima} le sale a {euros(siguiente.precio)} cada una</p>}
             </li>
           ); })}
         </ul>
@@ -303,17 +377,19 @@ function Ticket({ carrito, total, cambiar, vaciar, cobrar, ultima, imprimir }: {
         Cobrar <kbd className="tecla hidden border-white/30 bg-white/15 text-white lg:inline">F2</kbd>
       </button>
       {ultima && !carrito.length && (
-        <button className="boton-sec mt-2 w-full" onClick={() => imprimir(ultima)}>
-          <Printer className="size-4" /> Imprimir ticket nº {ultima.id} ({euros(ultima.total)})
-        </button>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <p className="col-span-2 text-center text-xs text-tenue">Ticket nº {ultima.id} ({euros(ultima.total)})</p>
+          <button className="boton-sec" onClick={() => compartir(ultima)}><Share2 className="size-4" /> Compartir</button>
+          <button className="boton-sec" onClick={() => imprimir(ultima)}><Printer className="size-4" /> Imprimir</button>
+        </div>
       )}
     </div>
   );
 }
 
 /** Lo que se envía al confirmar: forma de pago, el efectivo entregado
- *  (para el cambio) y, si es mixto, lo pagado con tarjeta y Bizum. */
-interface DatosCobro { pago: Pago; entregado: number | null; tarjeta?: number; bizum?: number }
+ *  (para el cambio), lo que no es efectivo si es mixto y a quién se fía. */
+interface DatosCobro { pago: Pago; entregado: number | null; tarjeta?: number; bizum?: number; fiado?: number; cliente?: number }
 
 const centimos = (n: number | null) => Math.round((n ?? 0) * 100);
 
@@ -322,23 +398,25 @@ function Cobro({ abierto, total, alCerrar, alConfirmar }: {
 }) {
   const [pago, setPago] = useState<Pago>("efectivo");
   const [entregado, setEntregado] = useState("");
-  const [partes, setPartes] = useState<Record<FormaPago, number | null>>({ efectivo: null, tarjeta: null, bizum: null });
+  const [partes, setPartes] = useState<Record<Parte, number | null>>({ efectivo: null, tarjeta: null, bizum: null, fiado: null });
+  const [cliente, setCliente] = useState<number | "">("");
   const [enviando, setEnviando] = useState(false);
   const recibido = Number(entregado.replace(",", ".")) || 0;
   const cambio = pago === "efectivo" && recibido ? Math.round((recibido - total) * 100) / 100 : null;
 
   // Pago mixto (en céntimos para no arrastrar decimales)
   const totalC = centimos(total);
-  const sumaC = centimos(partes.efectivo) + centimos(partes.tarjeta) + centimos(partes.bizum);
+  const sumaC = centimos(partes.efectivo) + centimos(partes.tarjeta) + centimos(partes.bizum) + centimos(partes.fiado);
   const sobraC = sumaC - totalC; // > 0: cambio en efectivo
-  const usadas = (Object.keys(partes) as FormaPago[]).filter((k) => centimos(partes[k]) > 0);
+  const usadas = (Object.keys(partes) as Parte[]).filter((k) => centimos(partes[k]) > 0);
   const mixtoValido = sumaC >= totalC && sobraC <= centimos(partes.efectivo) && usadas.length > 0;
-  const resto = (k: FormaPago) => Math.max(0, totalC - sumaC + centimos(partes[k])) / 100;
+  const resto = (k: Parte) => Math.max(0, totalC - sumaC + centimos(partes[k])) / 100;
 
-  const falta = pago === "efectivo" ? cambio != null && cambio < 0 : pago === "mixto" && !mixtoValido;
+  const hayFiado = pago === "fiado" || (pago === "mixto" && centimos(partes.fiado) > 0);
+  const falta = (pago === "efectivo" ? cambio != null && cambio < 0 : pago === "mixto" && !mixtoValido) || (hayFiado && !cliente);
 
   useEffect(() => {
-    if (!abierto) { setPago("efectivo"); setEntregado(""); setPartes({ efectivo: null, tarjeta: null, bizum: null }); }
+    if (!abierto) { setPago("efectivo"); setEntregado(""); setPartes({ efectivo: null, tarjeta: null, bizum: null, fiado: null }); setCliente(""); }
   }, [abierto]);
 
   async function confirmar(e?: FormEvent) {
@@ -346,14 +424,15 @@ function Cobro({ abierto, total, alCerrar, alConfirmar }: {
     if (enviando || falta) return;
     setEnviando(true);
     if (pago !== "mixto") {
-      await alConfirmar({ pago, entregado: pago === "efectivo" && recibido ? recibido : null });
+      await alConfirmar({ pago, entregado: pago === "efectivo" && recibido ? recibido : null, ...(pago === "fiado" ? { cliente: cliente as number } : {}) });
     } else if (usadas.length === 1) {
       // Al final se ha pagado todo de una forma: se guarda como pago normal
       const unica = usadas[0];
-      await alConfirmar({ pago: unica, entregado: unica === "efectivo" ? (partes.efectivo ?? 0) : null });
+      await alConfirmar({ pago: unica, entregado: unica === "efectivo" ? (partes.efectivo ?? 0) : null, ...(unica === "fiado" ? { cliente: cliente as number } : {}) });
     } else {
       await alConfirmar({
-        pago: "mixto", tarjeta: centimos(partes.tarjeta) / 100, bizum: centimos(partes.bizum) / 100,
+        pago: "mixto", tarjeta: centimos(partes.tarjeta) / 100, bizum: centimos(partes.bizum) / 100, fiado: centimos(partes.fiado) / 100,
+        ...(hayFiado ? { cliente: cliente as number } : {}),
         entregado: centimos(partes.efectivo) > 0 ? centimos(partes.efectivo) / 100 : null,
       });
     }
@@ -366,7 +445,7 @@ function Cobro({ abierto, total, alCerrar, alConfirmar }: {
         <p className="text-sm text-suave">Total a cobrar</p>
         <p className="text-4xl font-bold tracking-tight tabular-nums">{euros(total)}</p>
       </div>
-      <div className="mb-5 grid grid-cols-4 gap-2">
+      <div className="mb-5 grid grid-cols-3 gap-2 sm:grid-cols-5">
         {PAGOS.map(({ id, nombre, icono: Icono }) => (
           <button
             key={id}
@@ -398,7 +477,7 @@ function Cobro({ abierto, total, alCerrar, alConfirmar }: {
         <form onSubmit={confirmar} className="mb-5 space-y-2">
           <p className="text-xs text-tenue">Reparte el total. "Resto" pone lo que falta. Si en efectivo te dan de más, se calcula el cambio.</p>
           {PAGOS.filter((p) => p.id !== "mixto").map(({ id, nombre, icono: Icono }) => {
-            const k = id as FormaPago;
+            const k = id as Parte;
             return (
               <div key={k} className="flex items-center gap-2">
                 <label htmlFor={`parte-${k}`} className="flex w-28 shrink-0 items-center gap-2 text-sm font-medium"><Icono className="size-4 text-tenue" />{nombre}</label>
@@ -410,10 +489,16 @@ function Cobro({ abierto, total, alCerrar, alConfirmar }: {
             );
           })}
           {sumaC > 0 && (sumaC < totalC ? <Saldo falta importe={(totalC - sumaC) / 100} />
-            : sobraC > centimos(partes.efectivo) ? <p className="mt-3 rounded-xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">Con tarjeta y Bizum se cobra más que el total</p>
+            : sobraC > centimos(partes.efectivo) ? <p className="mt-3 rounded-xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">Sin contar el efectivo ya se pasa del total</p>
             : sobraC > 0 ? <Saldo falta={false} importe={sobraC / 100} /> : null)}
           <button type="submit" hidden />
         </form>
+      )}
+      {hayFiado && (
+        <div className="mb-5">
+          <label className="etiqueta" htmlFor="cobro-cliente">Se apunta a</label>
+          <ElegirCliente id="cobro-cliente" valor={cliente} alCambiar={setCliente} />
+        </div>
       )}
       <button className="boton w-full py-3.5 text-base" disabled={enviando || falta} onClick={() => confirmar()} autoFocus={pago === "tarjeta" || pago === "bizum"}>
         Confirmar venta

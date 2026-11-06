@@ -1,10 +1,11 @@
-import type { ReactNode } from "react";
-import { AlertTriangle, ArrowRight, CalendarClock, Euro, PackageCheck, Receipt, ShoppingCart, TrendingUp, Truck } from "lucide-react";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { AlertTriangle, ArrowRight, CalendarClock, Check, Euro, PackageCheck, Pin, Receipt, ShoppingCart, StickyNote, Trash2, TrendingUp, Truck, Undo2 } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { cantidad, euros, type AlertaStock, type Caducidad } from "../api";
+import { borrar, cantidad, euros, patch, post, type AlertaStock, type Caducidad, type Usuario } from "../api";
 import type { PropsPagina } from "../App";
-import { Cabecera, Esqueleto, Insignia, Kpi, Vacio, useColoresGrafico, useDatos } from "../ui";
+import { Cabecera, Confirmar, Esqueleto, Insignia, Kpi, Vacio, useAviso, useColoresGrafico, useDatos } from "../ui";
 
+interface Nota { id: number; texto: string; fecha: string; usuario: string; autor: string; fijada: number; hecha: number }
 interface Mes { mes: string; beneficio_neto: number; facturacion: number; margen_pct: number }
 interface Dia { dia: string; facturacion: number; num_ventas: number }
 interface Hoy { tickets: number; facturado: number; tickets_ayer: number; facturado_ayer: number }
@@ -55,6 +56,8 @@ export default function Inicio({ usuario, ir }: PropsPagina) {
         <Kpi titulo="Caducidades" valor={String(cad.datos?.length ?? "—")} detalle="lotes a revisar" icono={<CalendarClock className="size-5" />} color={cad.datos?.length ? "rojo" : "marca"} />
       </div>
 
+      <Notas usuario={usuario} />
+
       {admin && (
         <div className="tarjeta mt-6 p-5">
           <div className="mb-4 flex items-baseline justify-between">
@@ -104,7 +107,7 @@ export default function Inicio({ usuario, ir }: PropsPagina) {
         />
         <Lista
           titulo="Hay que pedir"
-          alVerTodo={() => ir("stock")}
+          alVerTodo={() => ir(admin ? "compras/pedido" : "stock")}
           cargando={stock.cargando}
           vacio={<Vacio icono={<PackageCheck className="size-6" />} titulo="Todo el stock está bien" />}
           filas={stock.datos?.slice(0, 5).map((s) => ({
@@ -116,6 +119,107 @@ export default function Inicio({ usuario, ir }: PropsPagina) {
         />
       </div>
     </>
+  );
+}
+
+const fechaNota = (iso: string) =>
+  new Date(iso).toLocaleString("es-ES", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+function Notas({ usuario }: { usuario: Usuario }) {
+  const avisar = useAviso();
+  const notas = useDatos<Nota[]>("/notas");
+  const [texto, setTexto] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const [aBorrar, setABorrar] = useState<Nota | null>(null);
+
+  async function anadir(e: FormEvent) {
+    e.preventDefault();
+    setGuardando(true);
+    try {
+      const enviado = texto;
+      await post("/notas", { texto: enviado });
+      // Si ha seguido escribiendo mientras se guardaba, no se le borra
+      setTexto((actual) => (actual === enviado ? "" : actual));
+      notas.recargar();
+    } catch (err) {
+      avisar("error", (err as Error).message);
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  async function marcar(nota: Nota, cambio: Partial<Pick<Nota, "fijada" | "hecha">>) {
+    try {
+      await patch(`/notas/${nota.id}`, Object.fromEntries(Object.entries(cambio).map(([k, v]) => [k, !!v])));
+      notas.recargar();
+    } catch (err) {
+      avisar("error", (err as Error).message);
+    }
+  }
+
+  async function confirmarBorrado(nota: Nota) {
+    setABorrar(null);
+    try {
+      await borrar(`/notas/${nota.id}`);
+      notas.recargar();
+    } catch (err) {
+      avisar("error", (err as Error).message);
+    }
+  }
+
+  return (
+    <div className="tarjeta mt-6 p-5">
+      <h2 className="mb-3 font-semibold">Notas</h2>
+      <form onSubmit={anadir} className="flex flex-col gap-2 sm:flex-row sm:items-start">
+        <textarea
+          className="campo min-h-11 flex-1 resize-y" rows={2} maxLength={1000} aria-label="Nueva nota"
+          placeholder="Escribe una nota para el equipo…" value={texto} onChange={(e) => setTexto(e.target.value)}
+        />
+        <button className="boton shrink-0" disabled={!texto.trim() || guardando}>Añadir nota</button>
+      </form>
+
+      {notas.cargando ? (
+        <div className="space-y-2 pt-4">{[1, 2].map((i) => <Esqueleto key={i} className="h-12" />)}</div>
+      ) : notas.datos?.length ? (
+        <ul className="mt-3 max-h-80 overflow-y-auto">
+          {notas.datos.map((n) => (
+            <li key={n.id} className={`flex items-start justify-between gap-3 border-b border-borde py-3 text-sm last:border-0 ${n.hecha ? "opacity-55" : ""}`}>
+              <div className="min-w-0">
+                <p className={`whitespace-pre-wrap break-words ${n.hecha ? "line-through" : ""}`}>{n.texto}</p>
+                <p className="mt-1 text-xs text-tenue">{n.autor} · {fechaNota(n.fecha)}</p>
+              </div>
+              <div className="flex shrink-0">
+                {!n.hecha && (
+                  <button className={`rounded-lg p-1.5 hover:bg-superficie-2 ${n.fijada ? "text-marca-fuerte" : "text-tenue hover:text-texto"}`} onClick={() => marcar(n, { fijada: n.fijada ? 0 : 1 })}
+                    aria-label={n.fijada ? "Quitar de arriba" : "Fijar arriba"} aria-pressed={!!n.fijada} title={n.fijada ? "Quitar de arriba" : "Fijar arriba"}>
+                    <Pin className="size-4" />
+                  </button>
+                )}
+                <button className="rounded-lg p-1.5 text-tenue hover:bg-superficie-2 hover:text-texto" onClick={() => marcar(n, { hecha: n.hecha ? 0 : 1 })}
+                  aria-label={n.hecha ? "Marcar como pendiente" : "Marcar como hecha"} title={n.hecha ? "Marcar como pendiente" : "Marcar como hecha"}>
+                  {n.hecha ? <Undo2 className="size-4" /> : <Check className="size-4" />}
+                </button>
+                {(usuario.rol === "admin" || n.usuario === usuario.usuario) && (
+                  <button className="rounded-lg p-1.5 text-tenue hover:bg-superficie-2 hover:text-rose-500" onClick={() => setABorrar(n)} aria-label="Borrar nota" title="Borrar nota">
+                    <Trash2 className="size-4" />
+                  </button>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : notas.error ? (
+        <p className="pt-4 text-sm text-tenue">No se han podido cargar las notas.</p>
+      ) : (
+        <Vacio icono={<StickyNote className="size-6" />} titulo="Todavía no hay notas" />
+      )}
+
+      <Confirmar
+        abierto={!!aBorrar} alCerrar={() => setABorrar(null)} alConfirmar={() => aBorrar && confirmarBorrado(aBorrar)}
+        titulo="Borrar nota" textoBoton="Borrar" peligro
+        mensaje={aBorrar && <>Se borrará la nota de <b>{aBorrar.autor}</b>. No se puede deshacer.</>}
+      />
+    </div>
   );
 }
 

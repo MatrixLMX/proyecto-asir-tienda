@@ -1,47 +1,14 @@
-import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { comprobarPassword, hashPassword } from "../src/claves";
-
-const db = (env as unknown as { DB: D1Database }).DB;
-const CLAVE = "clave-de-prueba-1";
-
-const pedir = (ruta: string, init: RequestInit = {}, ip = "1.1.1.1") =>
-  (exports as unknown as { default: { fetch: typeof fetch } }).default.fetch(`https://tienda.test/api${ruta}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", "CF-Connecting-IP": ip, ...init.headers },
-  });
-
-const entrar = (usuario: string, password: string, ip?: string) =>
-  pedir("/auth/login", { method: "POST", body: JSON.stringify({ usuario, password }) }, ip);
+import { CLAVE, contar, db, entrar, pedir, reiniciar, stock } from "./ayuda";
 
 let token = "";
 const conToken = (ruta: string, init: RequestInit = {}) =>
   pedir(ruta, { ...init, headers: { Authorization: `Bearer ${token}` } });
 const vender = (datos: unknown) => conToken("/ventas", { method: "POST", body: JSON.stringify(datos) });
 
-const stock = async (id: number) =>
-  (await db.prepare("SELECT stock_milli FROM productos WHERE id = ?").bind(id).first<number>("stock_milli"))!;
-const contar = async (tabla: string) => (await db.prepare(`SELECT COUNT(*) AS n FROM ${tabla}`).first<number>("n"))!;
-
-// Productos: 1 agua (20 u, 1,20 €), 2 patatas por kg (10 kg, 3,99 €),
-// 3 yogur con tres lotes, 4 dado de baja, 5 con 5 unidades
 beforeEach(async () => {
-  const h = await hashPassword(CLAVE, 1000);
-  await db.batch([
-    db.prepare("DELETE FROM lotes_consumidos"), db.prepare("DELETE FROM lineas_venta"), db.prepare("DELETE FROM ventas"),
-    db.prepare("DELETE FROM lotes"), db.prepare("DELETE FROM productos"), db.prepare("DELETE FROM intentos_login"),
-    db.prepare("INSERT OR REPLACE INTO usuarios_app (id, usuario, nombre, password_hash, rol) VALUES (1, 'jefe', 'Jefe', ?, 'admin')").bind(h),
-    db.prepare(`INSERT INTO productos (id, codigo_barras, nombre, categoria_id, iva_id, unidad_medida, precio_venta_cent, coste_medio_dm, stock_milli, stock_minimo_milli, activo) VALUES
-      (1, '111', 'Agua', 2, 2, 'unidad', 120, 5000, 20000, 5000, 1),
-      (2, NULL, 'Patatas', 3, 1, 'kg', 399, 15000, 10000, 2000, 1),
-      (3, NULL, 'Yogur', 1, 2, 'unidad', 250, 10000, 12000, 1000, 1),
-      (4, NULL, 'Retirado', 1, 2, 'unidad', 100, 0, 50000, 0, 0),
-      (5, NULL, 'Escaso', 1, 2, 'unidad', 100, 0, 5000, 10000, 1)`),
-    db.prepare(`INSERT INTO lotes (id, producto_id, fecha_entrada, fecha_caducidad, inicial_milli, restante_milli) VALUES
-      (10, 3, '2026-01-01', '2030-03-01', 4000, 4000),
-      (11, 3, '2026-01-01', '2030-01-01', 3000, 3000),
-      (12, 3, '2026-01-01', '2030-02-01', 5000, 5000)`),
-  ]);
+  await reiniciar();
   const r = await entrar("jefe", CLAVE);
   token = ((await r.json()) as { token: string }).token;
 });
@@ -95,7 +62,7 @@ describe("productos", () => {
     expect(lista.map((p) => p.producto)).toEqual(["Agua", "Escaso", "Patatas", "Yogur"]);
     expect(lista[0]).toEqual({
       id: 1, codigo_barras: "111", producto: "Agua", categoria: "Bebidas", unidad_medida: "unidad",
-      precio_venta: 1.2, stock_actual: 20, stock_minimo: 5, estado: "OK",
+      precio_venta: 1.2, stock_actual: 20, stock_minimo: 5, estado: "OK", control_stock: 1, precio_libre: 0, acceso_rapido: 0,
     });
   });
 
@@ -231,13 +198,5 @@ describe("venta", () => {
     await vender({ lineas: [{ producto_id: 3, cantidad: 1 }] });
     await vender({ lineas: [{ producto_id: 3, cantidad: 1 }, { producto_id: 1, cantidad: 1 }] });
     expect(await (await conToken("/productos/mas-vendidos")).json()).toEqual([3, 1]);
-  });
-});
-
-describe("lo no migrado", () => {
-  it("responde 404 con un mensaje claro", async () => {
-    const r = await conToken("/caja");
-    expect(r.status).toBe(404);
-    expect(((await r.json()) as { detail: string }).detail).toContain("versión de prueba");
   });
 });

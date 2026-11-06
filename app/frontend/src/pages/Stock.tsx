@@ -1,6 +1,7 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { ArrowDown, ArrowUp, PackageMinus, PackageSearch, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ClipboardCheck, PackageMinus, PackageSearch, Search } from "lucide-react";
 import { cantidad, euros, post, type ProductoStock } from "../api";
+import type { PropsPagina } from "../App";
 import { Cabecera, Esqueleto, Insignia, Modal, Pestañas, Vacio, emitirCambio, useAviso, useDatos } from "../ui";
 
 const MOTIVOS = [
@@ -14,7 +15,7 @@ const MOTIVOS = [
 type Filtro = "todos" | "BAJO" | "AGOTADO";
 type Orden = "producto" | "categoria" | "precio_venta" | "stock_actual";
 
-export default function Stock() {
+export default function Stock({ usuario, ir }: PropsPagina) {
   const { datos } = useDatos<ProductoStock[]>("/productos");
   const [q, setQ] = useState("");
   const [filtro, setFiltro] = useState<Filtro>("todos");
@@ -48,7 +49,9 @@ export default function Stock() {
 
   return (
     <>
-      <Cabecera titulo="Stock" subtitulo="Se actualiza solo con cada compra, venta o merma" />
+      <Cabecera titulo="Stock" subtitulo="Se actualiza solo con cada compra, venta o merma">
+        {usuario.rol === "admin" && <button className="boton-sec" onClick={() => ir("recuento")}><ClipboardCheck className="size-4" /> Recuento</button>}
+      </Cabecera>
       <div className="mb-4 flex flex-wrap gap-3">
         <div className="relative min-w-60 flex-1">
           <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-tenue" />
@@ -89,9 +92,9 @@ export default function Stock() {
                     <td className="font-medium">{p.producto}</td>
                     <td className="text-suave">{p.categoria}</td>
                     <td className="text-right tabular-nums">{euros(p.precio_venta)}</td>
-                    <td className="text-right font-semibold tabular-nums">{cantidad(p.stock_actual, p.unidad_medida)}</td>
+                    <td className="text-right font-semibold tabular-nums">{p.control_stock ? cantidad(p.stock_actual, p.unidad_medida) : <span className="font-normal text-tenue">—</span>}</td>
                     <td className="hidden w-48 sm:table-cell">
-                      <div className="flex items-center gap-2">
+                      {!p.control_stock ? <span className="text-xs text-tenue">sin control de stock</span> : <div className="flex items-center gap-2">
                         <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-superficie-2">
                           <div
                             className={`h-full rounded-full ${color === "verde" ? "bg-emerald-500" : color === "ambar" ? "bg-amber-400" : "bg-rose-500"}`}
@@ -99,12 +102,12 @@ export default function Stock() {
                           />
                         </div>
                         {p.estado !== "OK" && <Insignia color={color}>{p.estado.toLowerCase()}</Insignia>}
-                      </div>
+                      </div>}
                     </td>
                     <td className="w-10 text-right">
                       <button
                         className="rounded-lg p-1.5 text-tenue hover:bg-superficie-2 hover:text-rose-500 disabled:opacity-30"
-                        disabled={p.stock_actual <= 0} onClick={() => setMerma(p)}
+                        disabled={!p.control_stock || p.stock_actual <= 0} onClick={() => setMerma(p)}
                         title="Registrar merma (roto, caducado…)" aria-label={`Registrar merma de ${p.producto}`}
                       >
                         <PackageMinus className="size-4" />

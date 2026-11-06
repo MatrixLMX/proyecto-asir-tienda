@@ -38,10 +38,38 @@ function htmlTicket(v: Venta, cambio?: { entregado: number; cambio: number }) {
     <table>${filas}</table><hr>
     <table><tr class="total"><td>TOTAL</td><td class="d">${euros(v.total)}</td></tr>
       ${pagos}
+      ${v.cliente ? `<tr><td>Cliente</td><td class="d">${escapar(v.cliente)}</td></tr>` : ""}
+      ${v.devuelto ? `<tr><td>Devuelto</td><td class="d">${num(v.devuelto)}</td></tr>` : ""}
       ${cambio ? `<tr><td>Entregado en efectivo</td><td class="d">${num(cambio.entregado)}</td></tr><tr><td>Cambio</td><td class="d">${num(cambio.cambio)}</td></tr>` : ""}</table>
     <hr><table class="iva"><tr><td>IVA</td><td>Base</td><td>Cuota</td><td>Total</td></tr>${desglose}</table>
     <hr><div class="c">IVA incluido · Gracias por su compra</div>
   </body></html>`;
+}
+
+/** El ticket en texto, para mandarlo al móvil del cliente que lo pida. */
+function textoTicket(v: Venta) {
+  const lineas = (v.lineas ?? []).map((l) =>
+    `${l.producto}\n  ${l.unidad_medida === "kg" ? `${num(l.cantidad, 3)} kg` : num(l.cantidad, 0)} x ${num(l.precio_unitario)} = ${num(l.importe)} €`);
+  const fecha = new Date(v.fecha).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" });
+  return [tienda.nombre, tienda.nif ? `NIF ${tienda.nif}` : "", `Ticket nº ${v.id} · ${fecha}`, "", ...lineas, "", `TOTAL ${euros(v.total)} (IVA incluido)`,
+    ...(v.devuelto ? [`Devuelto ${euros(v.devuelto)}`] : []),
+    ...partesPago(v).map((p) => `${NOMBRE_PAGO[p.metodo]}: ${euros(p.importe)}`)].filter((l, i) => l || i > 1).join("\n");
+}
+
+/** Comparte el ticket (WhatsApp, correo...). Sin esa opción en el navegador, lo copia.
+ *  Devuelve qué ha hecho, para avisarlo. */
+export async function compartirTicket(ventaId: number): Promise<"compartido" | "copiado"> {
+  const texto = textoTicket(await api<Venta>(`/ventas/${ventaId}`));
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: `Ticket nº ${ventaId}`, text: texto });
+      return "compartido";
+    } catch (e) {
+      if ((e as Error).name === "AbortError") return "compartido";
+    }
+  }
+  await navigator.clipboard.writeText(texto);
+  return "copiado";
 }
 
 /** Imprime un ticket sin abrir ventanas nuevas (iframe oculto). */

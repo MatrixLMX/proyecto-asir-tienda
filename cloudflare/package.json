@@ -8,7 +8,10 @@
     "tipos": "tsc --noEmit",
     "migrar:local": "wrangler d1 migrations apply tienda --local",
     "migrar:remoto": "wrangler d1 migrations apply tienda --remote",
-    "desplegar": "wrangler deploy"
+    "desplegar": "wrangler deploy",
+    "copia": "node scripts/copia.mjs",
+    "activar-asistente": "node scripts/activar_asistente.mjs",
+    "activar-avisos": "node scripts/activar_avisos.mjs"
   },
   "dependencies": {
     "hono": "^4.13.16"

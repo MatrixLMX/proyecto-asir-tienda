@@ -17,7 +17,17 @@ export interface ProductoStock {
   stock_actual: number;
   stock_minimo: number;
   estado: "OK" | "BAJO" | "AGOTADO";
+  control_stock: number;
+  precio_libre: number;
+  acceso_rapido: number;
 }
+
+export interface Oferta {
+  id: number; producto_id: number; producto: string; unidad_medida: "unidad" | "kg";
+  cantidad_minima: number; precio: number; precio_normal: number; activa: number;
+}
+
+export interface Cliente { id: number; nombre: string; telefono: string | null; notas: string | null; activo: number; deuda: number }
 
 export interface Caducidad {
   lote_id: number;
@@ -118,20 +128,20 @@ export function descargarCsv<T extends object>(nombre: string, filas: T[], colum
   URL.revokeObjectURL(a.href);
 }
 
-export interface LineaTicket { producto: string; unidad_medida: string; cantidad: number; precio_unitario: number; iva_porcentaje: number; importe: number }
+export interface LineaTicket { linea_id: number; devuelto: number; producto: string; unidad_medida: string; cantidad: number; precio_unitario: number; iva_porcentaje: number; importe: number }
 export type FormaPago = "efectivo" | "tarjeta" | "bizum";
 export interface Venta {
-  id: number; fecha: string; metodo_pago: FormaPago | "mixto"; pago_tarjeta: number; pago_bizum: number;
-  total: number; usuario: string | null; lineas?: LineaTicket[];
+  id: number; fecha: string; metodo_pago: FormaPago | "mixto" | "fiado"; pago_tarjeta: number; pago_bizum: number; pago_fiado: number;
+  cliente: string | null; devuelto: number; total: number; usuario: string | null; lineas?: LineaTicket[];
 }
-export const NOMBRE_PAGO: Record<Venta["metodo_pago"], string> = { efectivo: "Efectivo", tarjeta: "Tarjeta", bizum: "Bizum", mixto: "Mixto" };
+export const NOMBRE_PAGO: Record<Venta["metodo_pago"], string> = { efectivo: "Efectivo", tarjeta: "Tarjeta", bizum: "Bizum", mixto: "Mixto", fiado: "Fiado" };
 
 /** Cuánto se pagó de cada forma. En un pago mixto, el efectivo es lo que
- *  queda del total después de tarjeta y Bizum. */
-export function partesPago(v: Pick<Venta, "metodo_pago" | "total" | "pago_tarjeta" | "pago_bizum">): { metodo: FormaPago; importe: number }[] {
+ *  queda del total después de lo demás. */
+export function partesPago(v: Pick<Venta, "metodo_pago" | "total" | "pago_tarjeta" | "pago_bizum" | "pago_fiado">): { metodo: Exclude<Venta["metodo_pago"], "mixto">; importe: number }[] {
   if (v.metodo_pago !== "mixto") return [{ metodo: v.metodo_pago, importe: v.total }];
-  const efectivo = Math.round((v.total - v.pago_tarjeta - v.pago_bizum) * 100) / 100;
-  return ([["efectivo", efectivo], ["tarjeta", v.pago_tarjeta], ["bizum", v.pago_bizum]] as [FormaPago, number][])
+  const efectivo = Math.round((v.total - v.pago_tarjeta - v.pago_bizum - v.pago_fiado) * 100) / 100;
+  return ([["efectivo", efectivo], ["tarjeta", v.pago_tarjeta], ["bizum", v.pago_bizum], ["fiado", v.pago_fiado]] as [FormaPago | "fiado", number][])
     .filter(([, i]) => i > 0).map(([metodo, importe]) => ({ metodo, importe }));
 }
 export const textoPago = (v: Parameters<typeof partesPago>[0]) => v.metodo_pago === "mixto"

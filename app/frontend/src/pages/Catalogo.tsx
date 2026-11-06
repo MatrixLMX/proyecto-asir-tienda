@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { Download, FolderPlus, PackagePlus, Pencil, Phone, Plus, Search, Truck, X } from "lucide-react";
+import { Suspense, lazy, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { Download, FileSpreadsheet, FolderPlus, PackagePlus, Pencil, Phone, Plus, Search, Truck, X } from "lucide-react";
 import { api, cantidad, descargarCsv, diaISO, euros, fecha, patch, post } from "../api";
 import { BotonEscanear } from "../escaner";
 import { Cabecera, CampoNumero, Esqueleto, Insignia, Modal, Pestañas, emitirCambio, useAviso, useDatos } from "../ui";
 import type { ProductoAdmin } from "./Compras";
+
+// Solo se descarga si se usa: lleva el lector de Excel
+const Importar = lazy(() => import("./Importar"));
 
 interface Opcion { id: number; nombre: string; porcentaje?: number }
 interface Categoria { id: number; nombre: string; activa: number; productos: number }
@@ -13,11 +16,13 @@ interface FormProducto {
   nombre: string; codigo_barras: string; categoria_id: number; proveedor_id: number; iva_id: number; unidad_medida: "unidad" | "kg";
   precio_venta: number | null; coste: number | null; stock_minimo: number | null; stock_inicial: number | null; fecha_caducidad: string;
   controla_caducidad: boolean; vida_util_dias: number | null; dias_aviso_caducidad: number | null; activo: boolean;
+  control_stock: boolean; precio_libre: boolean; acceso_rapido: boolean;
 }
 const productoVacio: FormProducto = {
   nombre: "", codigo_barras: "", categoria_id: 0, proveedor_id: 0, iva_id: 0, unidad_medida: "unidad",
   precio_venta: null, coste: null, stock_minimo: null, stock_inicial: null, fecha_caducidad: "",
   controla_caducidad: false, vida_util_dias: null, dias_aviso_caducidad: 5, activo: true,
+  control_stock: true, precio_libre: false, acceso_rapido: false,
 };
 const proveedorVacio = { nombre: "", contacto: "", telefono: "", email: "", notas: "", activo: 1 };
 
@@ -114,6 +119,7 @@ function Productos() {
   // null: cerrado · {id: null}: nuevo · {id: n}: editando
   const [form, setForm] = useState<{ id: number | null; datos: FormProducto; actual?: ProductoAdmin } | null>(null);
   const [info, setInfo] = useState<InfoCodigo | "buscando" | null>(null);
+  const [importando, setImportando] = useState(false);
 
   const filas = useMemo(() => (productos.datos ?? []).filter((p) => (bajas || p.activo) &&
     `${p.nombre} ${p.categoria} ${p.proveedor ?? ""} ${p.codigo_barras ?? ""}`.toLowerCase().includes(q.toLowerCase())), [productos.datos, q, bajas]);
@@ -133,6 +139,7 @@ function Productos() {
       iva_id: (ivas.datos ?? []).find((i) => i.porcentaje === p.iva)?.id ?? 0, unidad_medida: p.unidad_medida,
       precio_venta: p.precio_venta, coste: redondear(p.coste_medio), stock_minimo: p.stock_minimo, stock_inicial: null, fecha_caducidad: "",
       controla_caducidad: !!p.controla_caducidad, vida_util_dias: p.vida_util_dias, dias_aviso_caducidad: p.dias_aviso_caducidad ?? 5, activo: !!p.activo,
+      control_stock: !!p.control_stock, precio_libre: !!p.precio_libre, acceso_rapido: !!p.acceso_rapido,
     },
   }); };
 
@@ -156,15 +163,16 @@ function Productos() {
     e.preventDefault();
     if (!form) return;
     const d = form.datos;
-    const caduca = d.controla_caducidad;
+    const caduca = d.control_stock && d.controla_caducidad;
     const cuerpo = {
       nombre: d.nombre.trim(), codigo_barras: d.codigo_barras.trim() || null, categoria_id: d.categoria_id, proveedor_id: d.proveedor_id || null,
       iva_id: d.iva_id, precio_venta: d.precio_venta ?? 0, stock_minimo: d.stock_minimo ?? 0, controla_caducidad: caduca,
       vida_util_dias: caduca && d.vida_util_dias ? d.vida_util_dias : null, dias_aviso_caducidad: d.dias_aviso_caducidad ?? 5,
+      control_stock: d.control_stock, precio_libre: d.precio_libre, acceso_rapido: d.acceso_rapido,
     };
     let ok: boolean;
     if (form.id == null) {
-      const hayStock = !!d.stock_inicial;
+      const hayStock = d.control_stock && !!d.stock_inicial;
       ok = await ejecutar(() => post("/productos", {
         ...cuerpo, unidad_medida: d.unidad_medida, coste_compra: d.coste, stock_inicial: d.stock_inicial,
         fecha_caducidad: caduca && hayStock && d.fecha_caducidad ? d.fecha_caducidad : null,
@@ -197,6 +205,7 @@ function Productos() {
             ["coste_medio", "Coste sin IVA"], ["precio_venta", "PVP"], ["margen", "Margen %"], ["stock_actual", "Stock"], ["unidad_medida", "Unidad"]])}>
             <Download className="size-4" /> CSV
           </button>
+          <button className="boton-sec" onClick={() => setImportando(true)}><FileSpreadsheet className="size-4" /> Importar</button>
           <button className="boton" onClick={() => nuevo()}><PackagePlus className="size-4" /> Producto</button>
         </div>
       </div>
@@ -227,10 +236,10 @@ function Productos() {
                       <p className="text-xs text-tenue">{p.categoria} · IVA {p.iva} %{p.controla_caducidad ? " · caduca" : ""}{p.codigo_barras ? ` · ${p.codigo_barras}` : ""}</p>
                     </td>
                     <td className="hidden text-suave md:table-cell">{p.proveedor ?? "—"}</td>
-                    <td className="text-right tabular-nums text-suave">{p.coste_medio ? euros(p.coste_medio) : <span className="text-amber-600 dark:text-amber-400">sin coste</span>}</td>
-                    <td className="text-right font-semibold tabular-nums">{euros(p.precio_venta)}</td>
-                    <td className="text-right">{p.coste_medio ? <Insignia color={margen >= 25 ? "verde" : margen >= 10 ? "ambar" : "rojo"}>{pct(margen)}</Insignia> : <span className="text-tenue">—</span>}</td>
-                    <td className="hidden text-right tabular-nums sm:table-cell">{cantidad(p.stock_actual, p.unidad_medida)}</td>
+                    <td className="text-right tabular-nums text-suave">{p.coste_medio ? euros(p.coste_medio) : <span className={p.precio_libre ? "text-tenue" : "text-amber-600 dark:text-amber-400"}>{p.precio_libre ? "—" : "sin coste"}</span>}</td>
+                    <td className="text-right font-semibold tabular-nums">{p.precio_libre ? <span className="text-xs font-medium text-tenue">libre</span> : euros(p.precio_venta)}</td>
+                    <td className="text-right">{p.coste_medio && !p.precio_libre ? <Insignia color={margen >= 25 ? "verde" : margen >= 10 ? "ambar" : "rojo"}>{pct(margen)}</Insignia> : <span className="text-tenue">—</span>}</td>
+                    <td className="hidden text-right tabular-nums sm:table-cell">{p.control_stock ? cantidad(p.stock_actual, p.unidad_medida) : <span className="text-tenue">—</span>}</td>
                     <td className="text-right">
                       <button className="rounded-lg p-1.5 text-tenue hover:bg-superficie-2 hover:text-texto" onClick={() => editar(p)} aria-label={`Editar ${p.nombre}`}>
                         <Pencil className="size-4" />
@@ -243,6 +252,8 @@ function Productos() {
           </table>
         )}
       </div>
+
+      {importando && <Suspense fallback={null}><Importar abierto alCerrar={() => setImportando(false)} /></Suspense>}
 
       <Modal abierto={!!form} alCerrar={() => setForm(null)} titulo={form?.id == null ? "Nuevo producto" : `Editar ${form.actual?.nombre}`} ancho="max-w-2xl">
         {form && (() => {
@@ -294,6 +305,20 @@ function Productos() {
               </select>
             </div>
 
+            <Seccion>En el mostrador</Seccion>
+            <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-borde p-3 text-sm sm:col-span-2">
+              <input type="checkbox" className="size-4 accent-emerald-600" checked={d.acceso_rapido} onChange={(e) => campo("acceso_rapido", e.target.checked)} />
+              <span><b>Acceso rápido</b><span className="block text-xs text-tenue">Sale siempre arriba en Vender. Para lo que no tiene código de barras, como la barra de pan.</span></span>
+            </label>
+            <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-borde p-3 text-sm">
+              <input type="checkbox" className="size-4 accent-emerald-600" checked={!d.control_stock} onChange={(e) => campo("control_stock", !e.target.checked)} />
+              <span><b>No llevar la cuenta del stock</b><span className="block text-xs text-tenue">Se vende sin límite y no avisa de que falte: chuches, pan…</span></span>
+            </label>
+            <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-borde p-3 text-sm">
+              <input type="checkbox" className="size-4 accent-emerald-600" checked={d.precio_libre} onChange={(e) => campo("precio_libre", e.target.checked)} />
+              <span><b>Precio libre</b><span className="block text-xs text-tenue">El importe se escribe al vender. Sin coste, cuenta todo como beneficio en los informes.</span></span>
+            </label>
+
             <Seccion>Precios</Seccion>
             <div>
               <label className="etiqueta" htmlFor="p-coste">{form.id == null ? "Precio de compra" : "Coste medio"} sin IVA (€{porKg})</label>
@@ -305,7 +330,7 @@ function Productos() {
             </div>
             <div>
               <label className="etiqueta" htmlFor="p-pvp">Precio de venta, con IVA (€{porKg})</label>
-              <CampoNumero id="p-pvp" required placeholder="Lo que paga el cliente" valor={d.precio_venta} alCambiar={(n) => campo("precio_venta", n)} />
+              <CampoNumero id="p-pvp" required={!d.precio_libre} disabled={d.precio_libre} placeholder={d.precio_libre ? "Se escribe al vender" : "Lo que paga el cliente"} valor={d.precio_venta} alCambiar={(n) => campo("precio_venta", n)} />
               {sugerido != null && d.precio_venta == null && (
                 <button type="button" className="mt-1 text-xs font-medium text-marca-fuerte hover:underline" onClick={() => campo("precio_venta", sugerido)}>
                   Para ganar un {MARGEN_OBJETIVO} %: {euros(sugerido)} (usar)
@@ -320,8 +345,8 @@ function Productos() {
               {(d.coste == null || ivaElegido == null) && <p className="col-span-3 text-xs text-tenue">Pon el IVA, el precio de compra y el de venta para ver lo que ganas.</p>}
             </div>
 
-            <Seccion>Stock</Seccion>
-            {form.id == null ? (
+            {d.control_stock && <Seccion>Stock</Seccion>}
+            {!d.control_stock ? null : form.id == null ? (
               <div>
                 <label className="etiqueta" htmlFor="p-stock">Cuánto tienes ahora ({d.unidad_medida === "kg" ? "kg" : "uds."})</label>
                 <CampoNumero id="p-stock" decimales={d.unidad_medida === "kg" ? 3 : 0} placeholder="0" valor={d.stock_inicial} alCambiar={(n) => campo("stock_inicial", n)} />
@@ -333,16 +358,16 @@ function Productos() {
                 <span className="block text-xs">Sube con las compras y baja con las ventas y las mermas.</span>
               </p>
             )}
-            <div>
+            {d.control_stock && <div>
               <label className="etiqueta" htmlFor="p-min">Avisar cuando queden menos de</label>
               <CampoNumero id="p-min" decimales={d.unidad_medida === "kg" ? 3 : 0} placeholder="0 (sin aviso)" valor={d.stock_minimo} alCambiar={(n) => campo("stock_minimo", n)} />
-            </div>
+            </div>}
 
-            <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-borde p-3 text-sm sm:col-span-2">
+            {d.control_stock && <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-borde p-3 text-sm sm:col-span-2">
               <input type="checkbox" className="size-4 accent-emerald-600" checked={d.controla_caducidad} onChange={(e) => campo("controla_caducidad", e.target.checked)} />
               <span><b>Tiene fecha de caducidad</b><span className="block text-xs text-tenue">Para lácteos, pan, bollería, embutido… Cada compra guarda su propia fecha (lote).</span></span>
-            </label>
-            {d.controla_caducidad && (
+            </label>}
+            {d.control_stock && d.controla_caducidad && (
               <>
                 {form.id == null && !!d.stock_inicial && (
                   <div>

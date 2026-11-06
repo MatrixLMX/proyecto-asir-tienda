@@ -1,9 +1,9 @@
-import { useState, type FormEvent } from "react";
-import { Ban, Banknote, CreditCard, Download, Lock, Printer, Receipt, Smartphone, Wallet } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { Ban, Banknote, CreditCard, Download, HandCoins, Lock, Printer, Receipt, Share2, Smartphone, Undo2, Wallet } from "lucide-react";
 import { borrar, cantidad, descargarCsv, diaISO, euros, fecha, fechaHora, post, textoPago, type Venta } from "../api";
 import type { PropsPagina } from "../App";
-import { imprimirTicket } from "../ticket";
-import { Cabecera, Confirmar, Esqueleto, Insignia, Kpi, Modal, Pestañas, Vacio, emitirCambio, useAviso, useDatos } from "../ui";
+import { compartirTicket, imprimirTicket } from "../ticket";
+import { Cabecera, CampoNumero, Confirmar, Esqueleto, Insignia, Kpi, Modal, Pestañas, Vacio, emitirCambio, useAviso, useDatos } from "../ui";
 
 type Metodo = Venta["metodo_pago"];
 interface ListaVentas { tickets: number; total: number; pagina: number; por_pagina: number; ventas: (Omit<Venta, "lineas"> & { lineas: number })[] }
@@ -11,12 +11,13 @@ interface Cierre {
   fecha: string; tickets: number; total_efectivo: number; total_tarjeta: number; total_bizum: number;
   fondo_inicial: number; efectivo_contado: number; diferencia: number; usuario: string | null; notas: string | null;
 }
-interface Caja { dia: string; tickets: number; total_efectivo: number; total_tarjeta: number; total_bizum: number; total: number; cierre: Cierre | null }
+interface Caja { dia: string; tickets: number; total_efectivo: number; total_tarjeta: number; total_bizum: number; total_fiado: number; cobros_fiado: number; total: number; cierre: Cierre | null }
 
 const METODOS: Record<Metodo, { nombre: string; icono: typeof Banknote }> = {
   efectivo: { nombre: "Efectivo", icono: Banknote },
   tarjeta: { nombre: "Tarjeta", icono: CreditCard },
   bizum: { nombre: "Bizum", icono: Smartphone },
+  fiado: { nombre: "Fiado", icono: HandCoins },
   mixto: { nombre: "Mixto", icono: Wallet },
 };
 
@@ -50,6 +51,7 @@ function Tickets({ esAdmin }: { esAdmin: boolean }) {
   const [pagina, setPagina] = useState(1);
   const [abierta, setAbierta] = useState<number | null>(null);
   const [anular, setAnular] = useState<Venta | null>(null);
+  const [devolver, setDevolver] = useState<Venta | null>(null);
 
   const ruta = `/ventas?desde=${desde}&hasta=${hasta}&pagina=${pagina}${metodo ? `&metodo=${metodo}` : ""}`;
   const { datos } = useDatos<ListaVentas>(ruta);
@@ -71,6 +73,9 @@ function Tickets({ esAdmin }: { esAdmin: boolean }) {
   }
 
   const imprimir = (id: number) => imprimirTicket(id).catch((e) => avisar("error", e.message));
+  const compartir = (id: number) => compartirTicket(id)
+    .then((r) => { if (r === "copiado") avisar("ok", "Ticket copiado: pégalo donde quieras enviarlo"); })
+    .catch((e) => avisar("error", e.message));
 
   return (
     <>
@@ -92,7 +97,7 @@ function Tickets({ esAdmin }: { esAdmin: boolean }) {
           {Object.entries(METODOS).map(([id, m]) => <option key={id} value={id}>{id === "mixto" ? "Solo pagos mixtos" : `Con ${m.nombre.toLowerCase()} (también mixtos)`}</option>)}
         </select>
         <button className="boton-sec ml-auto py-1.5" disabled={!datos?.ventas.length}
-          onClick={() => datos && descargarCsv(`tickets_${desde}_${hasta}`, datos.ventas, [["id", "Ticket"], ["fecha", "Fecha"], ["metodo_pago", "Pago"], ["pago_tarjeta", "Tarjeta (mixto)"], ["pago_bizum", "Bizum (mixto)"], ["lineas", "Líneas"], ["usuario", "Usuario"], ["total", "Total"]])}>
+          onClick={() => datos && descargarCsv(`tickets_${desde}_${hasta}`, datos.ventas, [["id", "Ticket"], ["fecha", "Fecha"], ["metodo_pago", "Pago"], ["pago_tarjeta", "Tarjeta (mixto)"], ["pago_bizum", "Bizum (mixto)"], ["pago_fiado", "Fiado"], ["cliente", "Cliente"], ["devuelto", "Devuelto"], ["lineas", "Líneas"], ["usuario", "Usuario"], ["total", "Total"]])}>
           <Download className="size-4" /> CSV
         </button>
       </div>
@@ -120,7 +125,7 @@ function Tickets({ esAdmin }: { esAdmin: boolean }) {
                     <td><span className="inline-flex items-center gap-1.5 text-suave" title={textoPago(v)}><M.icono className="size-4" />{M.nombre}</span></td>
                     <td className="hidden tabular-nums text-suave sm:table-cell">{v.lineas}</td>
                     <td className="hidden text-suave md:table-cell">{v.usuario ?? "—"}</td>
-                    <td className="text-right font-semibold tabular-nums">{euros(v.total)}</td>
+                    <td className="text-right font-semibold tabular-nums">{euros(v.total)}{v.devuelto > 0 && <span className="block text-xs font-medium text-rose-600 dark:text-rose-400">−{euros(v.devuelto)}</span>}</td>
                   </tr>
                 );
               })}
@@ -141,23 +146,28 @@ function Tickets({ esAdmin }: { esAdmin: boolean }) {
         {!detalle.datos || detalle.datos.id !== abierta ? <Esqueleto className="h-40" /> : (
           <>
             <p className="mb-3 text-sm text-suave">
-              {fechaHora(detalle.datos.fecha)} · {textoPago(detalle.datos)} · {detalle.datos.usuario ?? "—"}
+              {fechaHora(detalle.datos.fecha)} · {textoPago(detalle.datos)}{detalle.datos.cliente ? ` · ${detalle.datos.cliente}` : ""} · {detalle.datos.usuario ?? "—"}
             </p>
             <ul className="mb-4 max-h-[45vh] divide-y divide-borde overflow-y-auto rounded-xl border border-borde">
               {detalle.datos.lineas?.map((l, i) => (
                 <li key={i} className="flex justify-between gap-3 px-4 py-2.5 text-sm">
-                  <span><span className="font-medium">{l.producto}</span><span className="block text-xs text-tenue">{cantidad(l.cantidad, l.unidad_medida)} × {euros(l.precio_unitario)} · IVA {l.iva_porcentaje} %</span></span>
+                  <span><span className="font-medium">{l.producto}</span><span className="block text-xs text-tenue">{cantidad(l.cantidad, l.unidad_medida)} × {euros(l.precio_unitario)} · IVA {l.iva_porcentaje} %</span>{l.devuelto > 0 && <span className="block text-xs font-medium text-rose-600 dark:text-rose-400">Devuelto: {cantidad(l.devuelto, l.unidad_medida)}</span>}</span>
                   <span className="font-semibold tabular-nums">{euros(l.importe)}</span>
                 </li>
               ))}
             </ul>
             <div className="mb-5 flex items-baseline justify-between"><span className="text-suave">Total</span><span className="text-2xl font-bold tabular-nums">{euros(detalle.datos.total)}</span></div>
+            {detalle.datos.devuelto > 0 && <p className="-mt-3 mb-5 text-right text-sm font-medium text-rose-600 dark:text-rose-400">Devuelto {euros(detalle.datos.devuelto)}</p>}
             <div className="flex flex-wrap justify-end gap-2">
-              {esAdmin && (
+              {esAdmin && !detalle.datos.devuelto && (
                 <button className="boton-sec text-rose-600 dark:text-rose-400" onClick={() => setAnular(detalle.datos)}>
                   <Ban className="size-4" /> Anular
                 </button>
               )}
+              {detalle.datos.lineas?.some((l) => l.devuelto < l.cantidad) && (
+                <button className="boton-sec" onClick={() => setDevolver(detalle.datos)}><Undo2 className="size-4" /> Devolver</button>
+              )}
+              <button className="boton-sec" onClick={() => compartir(detalle.datos!.id)}><Share2 className="size-4" /> Compartir</button>
               <button className="boton" onClick={() => imprimir(detalle.datos!.id)}><Printer className="size-4" /> Imprimir</button>
             </div>
           </>
@@ -169,7 +179,91 @@ function Tickets({ esAdmin }: { esAdmin: boolean }) {
         titulo="Anular ticket" textoBoton="Anular ticket" peligro
         mensaje={anular && <>Se anulará el ticket nº <b>{anular.id}</b> de <b>{euros(anular.total)}</b>. Los productos vuelven al stock y queda apuntado en el registro de cambios. Si hay que devolver dinero al cliente, hazlo en caja.</>}
       />
+      <Devolver venta={devolver} alCerrar={() => setDevolver(null)} alTerminar={() => { setDevolver(null); detalle.recargar(); emitirCambio(); }} />
     </>
+  );
+}
+
+/* =====================================================================
+   Devolución de parte de un ticket
+   ===================================================================== */
+const FORMAS_DEVOLUCION = [
+  { id: "efectivo", nombre: "Efectivo" }, { id: "tarjeta", nombre: "Tarjeta" }, { id: "bizum", nombre: "Bizum" }, { id: "fiado", nombre: "Rebajar deuda" },
+] as const;
+
+function Devolver({ venta, alCerrar, alTerminar }: { venta: Venta | null; alCerrar: () => void; alTerminar: () => void }) {
+  const avisar = useAviso();
+  const [cantidades, setCantidades] = useState<Record<number, number | null>>({});
+  const [rotas, setRotas] = useState<Record<number, boolean>>({});
+  const [metodo, setMetodo] = useState<(typeof FORMAS_DEVOLUCION)[number]["id"]>("efectivo");
+  const [notas, setNotas] = useState("");
+  const [enviando, setEnviando] = useState(false);
+
+  useEffect(() => {
+    setCantidades({}); setRotas({}); setNotas("");
+    setMetodo(venta?.pago_fiado ? "fiado" : venta?.metodo_pago === "tarjeta" || venta?.metodo_pago === "bizum" ? venta.metodo_pago : "efectivo");
+  }, [venta]);
+
+  const lineas = venta?.lineas?.filter((l) => l.devuelto < l.cantidad) ?? [];
+  const elegidas = lineas.filter((l) => (cantidades[l.linea_id] ?? 0) > 0);
+  const excede = elegidas.some((l) => cantidades[l.linea_id]! > Math.round((l.cantidad - l.devuelto) * 1000) / 1000);
+  const aprox = elegidas.reduce((s, l) => s + cantidades[l.linea_id]! * l.precio_unitario, 0);
+
+  async function enviar(e: FormEvent) {
+    e.preventDefault();
+    if (!venta) return;
+    setEnviando(true);
+    try {
+      const r = await post<{ importe: number }>(`/ventas/${venta.id}/devolucion`, {
+        metodo, notas: notas || null,
+        lineas: elegidas.map((l) => ({ linea_id: l.linea_id, cantidad: cantidades[l.linea_id], repuesto: !rotas[l.linea_id] })),
+      });
+      avisar("ok", metodo === "fiado" ? `Deuda rebajada en ${euros(r.importe)}` : `Devuelve ${euros(r.importe)} en ${metodo}`);
+      alTerminar();
+    } catch (err) { avisar("error", (err as Error).message); } finally { setEnviando(false); }
+  }
+
+  return (
+    <Modal abierto={!!venta} alCerrar={alCerrar} titulo={`Devolver del ticket nº ${venta?.id ?? ""}`} ancho="max-w-lg">
+      <form onSubmit={enviar} className="space-y-4">
+        <ul className="max-h-[42vh] divide-y divide-borde overflow-y-auto rounded-xl border border-borde">
+          {lineas.map((l) => {
+            const queda = Math.round((l.cantidad - l.devuelto) * 1000) / 1000;
+            const n = cantidades[l.linea_id] ?? null;
+            return (
+              <li key={l.linea_id} className="space-y-2 px-3 py-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="min-w-0"><span className="block font-medium">{l.producto}</span><span className="block text-xs text-tenue">Se puede devolver: {cantidad(queda, l.unidad_medida)} a {euros(l.precio_unitario)}</span></span>
+                  <CampoNumero aria-label={`Cantidad de ${l.producto}`} className={`campo w-20 shrink-0 py-1.5 text-center ${n && n > queda ? "border-rose-500" : ""}`} decimales={l.unidad_medida === "kg" ? 3 : 0} placeholder="0" valor={n} alCambiar={(v) => setCantidades((c) => ({ ...c, [l.linea_id]: v }))} />
+                </div>
+                {!!n && (
+                  <label className="flex cursor-pointer items-center gap-2 text-xs text-suave">
+                    <input type="checkbox" className="size-4 accent-emerald-600" checked={!rotas[l.linea_id]} onChange={(e) => setRotas((r) => ({ ...r, [l.linea_id]: !e.target.checked }))} />
+                    Vuelve a la estantería (desmárcalo si está roto o abierto)
+                  </label>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        <div>
+          <span className="etiqueta">Cómo se devuelve</span>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {FORMAS_DEVOLUCION.filter((f) => f.id !== "fiado" || venta?.pago_fiado).map((f) => (
+              <button type="button" key={f.id} onClick={() => setMetodo(f.id)} className={`rounded-xl border py-2 text-sm ${metodo === f.id ? "border-marca-500 bg-marca-suave font-medium text-marca-fuerte" : "border-borde text-suave"}`}>{f.nombre}</button>
+            ))}
+          </div>
+        </div>
+        <div><label className="etiqueta" htmlFor="dev-notas">Motivo (opcional)</label><input id="dev-notas" className="campo" maxLength={255} value={notas} onChange={(e) => setNotas(e.target.value)} /></div>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm text-suave">{elegidas.length > 0 && <>Unos <b className="text-texto">{euros(aprox)}</b></>}</p>
+          <div className="flex gap-2">
+            <button type="button" className="boton-sec" onClick={alCerrar}>Cancelar</button>
+            <button className="boton" disabled={!elegidas.length || excede || enviando}><Undo2 className="size-4" /> Devolver</button>
+          </div>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -230,6 +324,13 @@ function CierreCaja() {
           </>
         ) : Array.from({ length: 4 }, (_, i) => <Esqueleto key={i} className="h-[132px]" />)}
       </div>
+
+      {c && (c.total_fiado !== 0 || c.cobros_fiado !== 0) && (
+        <p className="mt-3 text-sm text-suave">
+          <HandCoins className="mr-1.5 inline size-4 align-text-bottom text-tenue" />
+          Vendido a fiado: <b className="text-texto tabular-nums">{euros(c.total_fiado)}</b> (no entra en caja) · Cobrado de fiados: <b className="text-texto tabular-nums">{euros(c.cobros_fiado)}</b> (ya sumado arriba)
+        </p>
+      )}
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[400px_1fr]">
         <div className="tarjeta h-fit p-5">
