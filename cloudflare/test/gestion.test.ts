@@ -333,7 +333,7 @@ describe("catálogo", () => {
     const r = await json(admin("/productos", "POST", { nombre: "Simple", categoria_id: 1, iva_id: 2, precio_venta: 1 }));
     expect(r.compra_id).toBeNull();
     for (const malo of [{ nombre: "", categoria_id: 1, iva_id: 2, precio_venta: 1 }, { nombre: "X", categoria_id: 999, iva_id: 2, precio_venta: 1 },
-      { nombre: "X", categoria_id: 1, iva_id: 2, precio_venta: -1 }, { nombre: "X", categoria_id: 1, iva_id: 2 }, { nombre: "X", categoria_id: 1, iva_id: 2, precio_venta: 1, unidad_medida: "litro" }]) {
+      { nombre: "X", categoria_id: 1, iva_id: 2, precio_venta: -1 }, { nombre: "X", categoria_id: 1, iva_id: 2, precio_venta: 1, unidad_medida: "litro" }]) {
       expect((await admin("/productos", "POST", malo)).status, JSON.stringify(malo)).toBe(400);
     }
   });
@@ -429,6 +429,20 @@ describe("informes", () => {
     expect(parados.map((p) => p.producto)).toEqual(["Escaso"]);
     expect(parados[0]!.dias_sin_vender).toBeGreaterThan(1000);
     expect(parados[0]!.ultima_venta).toBeNull();
+  });
+});
+
+describe("alta sin precio", () => {
+  it("se puede dar de alta sin precio, pero no vender hasta ponérselo", async () => {
+    const r = await admin("/productos", "POST", { nombre: "Escaneado", codigo_barras: "8400000000017", categoria_id: 1, iva_id: 2, stock_inicial: 6 });
+    expect(r.status).toBe(200);
+    const { id } = await json(r);
+    expect(await stock(id)).toBe(6000);
+    const v = await dependiente("/ventas", "POST", { lineas: [{ producto_id: id, cantidad: 1 }] });
+    expect(v.status).toBe(400);
+    expect((await json(v)).detail).toContain("todavía no tiene precio");
+    await admin(`/productos/${id}`, "PATCH", { precio_venta: 1.5 });
+    expect((await dependiente("/ventas", "POST", { lineas: [{ producto_id: id, cantidad: 1 }] })).status).toBe(200);
   });
 });
 

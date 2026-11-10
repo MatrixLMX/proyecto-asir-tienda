@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { Download, FileSpreadsheet, FolderPlus, PackagePlus, Pencil, Phone, Plus, Search, Truck, X } from "lucide-react";
+import { Download, FileSpreadsheet, FolderPlus, PackagePlus, Pencil, Phone, Plus, ScanBarcode, Search, Tag, Truck, X } from "lucide-react";
 import { api, cantidad, descargarCsv, diaISO, euros, fecha, patch, post } from "../api";
 import { BotonEscanear } from "../escaner";
 import { Cabecera, CampoNumero, Esqueleto, Insignia, Modal, Pestañas, emitirCambio, useAviso, useDatos } from "../ui";
@@ -7,6 +7,7 @@ import type { ProductoAdmin } from "./Compras";
 
 // Solo se descarga si se usa: lleva el lector de Excel
 const Importar = lazy(() => import("./Importar"));
+const AltaRapida = lazy(() => import("./AltaRapida"));
 
 interface Opcion { id: number; nombre: string; porcentaje?: number }
 interface Categoria { id: number; nombre: string; activa: number; productos: number }
@@ -120,9 +121,14 @@ function Productos() {
   const [form, setForm] = useState<{ id: number | null; datos: FormProducto; actual?: ProductoAdmin } | null>(null);
   const [info, setInfo] = useState<InfoCodigo | "buscando" | null>(null);
   const [importando, setImportando] = useState(false);
+  const [escaneando, setEscaneando] = useState(false);
+  const [soloSinPrecio, setSoloSinPrecio] = useState(false);
+  const sinPrecio = (p: ProductoAdmin) => !p.precio_libre && !p.precio_venta;
+  const numSinPrecio = (productos.datos ?? []).filter((p) => p.activo && sinPrecio(p)).length;
+  useEffect(() => { if (!numSinPrecio) setSoloSinPrecio(false); }, [numSinPrecio]);
 
-  const filas = useMemo(() => (productos.datos ?? []).filter((p) => (bajas || p.activo) &&
-    `${p.nombre} ${p.categoria} ${p.proveedor ?? ""} ${p.codigo_barras ?? ""}`.toLowerCase().includes(q.toLowerCase())), [productos.datos, q, bajas]);
+  const filas = useMemo(() => (productos.datos ?? []).filter((p) => (bajas || p.activo) && (!soloSinPrecio || sinPrecio(p)) &&
+    `${p.nombre} ${p.categoria} ${p.proveedor ?? ""} ${p.codigo_barras ?? ""}`.toLowerCase().includes(q.toLowerCase())), [productos.datos, q, bajas, soloSinPrecio]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const nuevo = (codigo = "") => { setInfo(null); setForm({ id: null, datos: { ...productoVacio, codigo_barras: codigo } }); if (codigo) buscarCodigo(codigo, true); };
 
@@ -137,7 +143,7 @@ function Productos() {
     id: p.id, actual: p, datos: {
       nombre: p.nombre, codigo_barras: p.codigo_barras ?? "", categoria_id: p.categoria_id, proveedor_id: p.proveedor_id ?? 0,
       iva_id: (ivas.datos ?? []).find((i) => i.porcentaje === p.iva)?.id ?? 0, unidad_medida: p.unidad_medida,
-      precio_venta: p.precio_venta, coste: redondear(p.coste_medio), stock_minimo: p.stock_minimo, stock_inicial: null, fecha_caducidad: "",
+      precio_venta: p.precio_libre || p.precio_venta ? p.precio_venta : null, coste: redondear(p.coste_medio), stock_minimo: p.stock_minimo, stock_inicial: null, fecha_caducidad: "",
       controla_caducidad: !!p.controla_caducidad, vida_util_dias: p.vida_util_dias, dias_aviso_caducidad: p.dias_aviso_caducidad ?? 5, activo: !!p.activo,
       control_stock: !!p.control_stock, precio_libre: !!p.precio_libre, acceso_rapido: !!p.acceso_rapido,
     },
@@ -199,16 +205,26 @@ function Productos() {
         <label className="flex cursor-pointer items-center gap-2 text-sm text-suave">
           <input type="checkbox" className="size-4 accent-emerald-600" checked={bajas} onChange={(e) => setBajas(e.target.checked)} /> Ver dados de baja
         </label>
-        <div className="ml-auto flex gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 sm:ml-auto sm:flex sm:w-auto">
           <button className="boton-sec" disabled={!filas.length} onClick={() => descargarCsv("catalogo", filas.map((p) => ({ ...p, margen: margenDe(p.precio_venta, p.iva, p.coste_medio) })), [
             ["nombre", "Producto"], ["codigo_barras", "Código"], ["categoria", "Categoría"], ["proveedor", "Proveedor"], ["iva", "IVA %"],
             ["coste_medio", "Coste sin IVA"], ["precio_venta", "PVP"], ["margen", "Margen %"], ["stock_actual", "Stock"], ["unidad_medida", "Unidad"]])}>
             <Download className="size-4" /> CSV
           </button>
           <button className="boton-sec" onClick={() => setImportando(true)}><FileSpreadsheet className="size-4" /> Importar</button>
+          <button className="boton-sec" onClick={() => setEscaneando(true)}><ScanBarcode className="size-4" /> Alta rápida</button>
           <button className="boton" onClick={() => nuevo()}><PackagePlus className="size-4" /> Producto</button>
         </div>
       </div>
+      {numSinPrecio > 0 && (
+        <button onClick={() => setSoloSinPrecio(!soloSinPrecio)} aria-pressed={soloSinPrecio}
+          className={`mb-4 flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition ${soloSinPrecio ? "border-amber-500 bg-amber-500/15" : "border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/15"}`}>
+          <Tag className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          <span className="flex-1"><b>{numSinPrecio} {numSinPrecio === 1 ? "producto sin precio" : "productos sin precio"}</b>
+            <span className="block text-xs text-suave">No se pueden vender hasta que lo tengan. {soloSinPrecio ? "Toca uno para ponérselo." : "Toca aquí para verlos."}</span></span>
+          <span className="text-xs font-medium text-amber-700 dark:text-amber-300">{soloSinPrecio ? "Ver todos" : "Ver"}</span>
+        </button>
+      )}
 
       <div className="tarjeta overflow-x-auto">
         {!productos.datos ? (
@@ -237,8 +253,8 @@ function Productos() {
                     </td>
                     <td className="hidden text-suave md:table-cell">{p.proveedor ?? "—"}</td>
                     <td className="text-right tabular-nums text-suave">{p.coste_medio ? euros(p.coste_medio) : <span className={p.precio_libre ? "text-tenue" : "text-amber-600 dark:text-amber-400"}>{p.precio_libre ? "—" : "sin coste"}</span>}</td>
-                    <td className="text-right font-semibold tabular-nums">{p.precio_libre ? <span className="text-xs font-medium text-tenue">libre</span> : euros(p.precio_venta)}</td>
-                    <td className="text-right">{p.coste_medio && !p.precio_libre ? <Insignia color={margen >= 25 ? "verde" : margen >= 10 ? "ambar" : "rojo"}>{pct(margen)}</Insignia> : <span className="text-tenue">—</span>}</td>
+                    <td className="text-right font-semibold tabular-nums">{p.precio_libre ? <span className="text-xs font-medium text-tenue">libre</span> : sinPrecio(p) ? <Insignia color="ambar">sin precio</Insignia> : euros(p.precio_venta)}</td>
+                    <td className="text-right">{p.coste_medio && !p.precio_libre && !sinPrecio(p) ? <Insignia color={margen >= 25 ? "verde" : margen >= 10 ? "ambar" : "rojo"}>{pct(margen)}</Insignia> : <span className="text-tenue">—</span>}</td>
                     <td className="hidden text-right tabular-nums sm:table-cell">{p.control_stock ? cantidad(p.stock_actual, p.unidad_medida) : <span className="text-tenue">—</span>}</td>
                     <td className="text-right">
                       <button className="rounded-lg p-1.5 text-tenue hover:bg-superficie-2 hover:text-texto" onClick={() => editar(p)} aria-label={`Editar ${p.nombre}`}>
@@ -254,6 +270,7 @@ function Productos() {
       </div>
 
       {importando && <Suspense fallback={null}><Importar abierto alCerrar={() => setImportando(false)} /></Suspense>}
+      {escaneando && <Suspense fallback={null}><AltaRapida abierto alCerrar={() => setEscaneando(false)} /></Suspense>}
 
       <Modal abierto={!!form} alCerrar={() => setForm(null)} titulo={form?.id == null ? "Nuevo producto" : `Editar ${form.actual?.nombre}`} ancho="max-w-2xl">
         {form && (() => {

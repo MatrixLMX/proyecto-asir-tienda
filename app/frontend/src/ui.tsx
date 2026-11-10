@@ -1,5 +1,5 @@
 import {
-  createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type InputHTMLAttributes, type ReactNode,
+  createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore, type InputHTMLAttributes, type ReactNode,
 } from "react";
 import { AlertCircle, CheckCircle2, Info, Monitor, Moon, Sun, TrendingDown, TrendingUp, X } from "lucide-react";
 import { api } from "./api";
@@ -145,15 +145,23 @@ export function ProveedorAvisos({ children }: { children: ReactNode }) {
    Ventanas modales
    ===================================================================== */
 
+// Ventanas abiertas, de la de abajo a la de arriba: Escape cierra solo la de arriba
+// (p. ej. la cámara abierta encima del formulario de un producto)
+const pilaModales: object[] = [];
+
 export function Modal({ abierto, alCerrar, titulo, children, ancho = "max-w-md" }: {
   abierto: boolean; alCerrar: () => void; titulo: string; children: ReactNode; ancho?: string;
 }) {
+  const cerrar = useRef(alCerrar);
+  cerrar.current = alCerrar;
   useEffect(() => {
     if (!abierto) return;
-    const tecla = (e: KeyboardEvent) => e.key === "Escape" && alCerrar();
+    const yo = {};
+    pilaModales.push(yo);
+    const tecla = (e: KeyboardEvent) => { if (e.key === "Escape" && pilaModales.at(-1) === yo) cerrar.current(); };
     window.addEventListener("keydown", tecla);
-    return () => window.removeEventListener("keydown", tecla);
-  }, [abierto, alCerrar]);
+    return () => { window.removeEventListener("keydown", tecla); pilaModales.splice(pilaModales.indexOf(yo), 1); };
+  }, [abierto]);
   if (!abierto) return null;
   return (
     <div className="fixed inset-0 z-50 grid place-items-end bg-slate-950/50 backdrop-blur-sm sm:place-items-center sm:p-4" onClick={alCerrar}>

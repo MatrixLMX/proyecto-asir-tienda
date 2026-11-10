@@ -75,6 +75,7 @@ export default function Vender({ usuario, ir }: PropsPagina) {
 
   function añadir(p: ProductoStock) {
     if (p.precio_libre) { setPidiendoPrecio(p); return; }
+    if (!p.precio_venta) { avisar("error", `${p.producto} todavía no tiene precio: pónselo en Catálogo`); return; }
     const yaHay = enCarrito(p.id);
     if (!sinStock(p) && p.stock_actual <= 0) { avisar("error", `${p.producto} está agotado`); return; }
     if (!sinStock(p) && p.unidad_medida === "unidad" && yaHay + 1 > p.stock_actual) {
@@ -254,7 +255,7 @@ export default function Vender({ usuario, ir }: PropsPagina) {
                     <span className="mt-1 line-clamp-2 pr-6 text-sm font-semibold leading-snug">{p.producto}</span>
                     <div className="mt-auto flex w-full items-end justify-between pt-3">
                       <span className="text-lg font-bold tabular-nums text-marca-fuerte">
-                        {p.precio_libre ? <span className="text-sm">Precio libre</span> : euros(p.precio_venta)}
+                        {p.precio_libre ? <span className="text-sm">Precio libre</span> : !p.precio_venta ? <span className="text-sm text-amber-600 dark:text-amber-400">Sin precio</span> : euros(p.precio_venta)}
                         {p.unidad_medida === "kg" && <span className="text-xs font-medium text-tenue">/kg</span>}
                       </span>
                       <span className={`whitespace-nowrap text-[11px] font-medium ${agotado ? "text-rose-500" : p.estado === "BAJO" ? "text-amber-600 dark:text-amber-400" : "text-tenue"}`}>

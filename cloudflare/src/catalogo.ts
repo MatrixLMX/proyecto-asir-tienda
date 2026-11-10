@@ -197,7 +197,7 @@ catalogo.post("/productos", soloAdmin, async (c) => {
   const precioLibre = booleano(p.precio_libre ?? false, "el precio libre");
   const stockInicial = controlStock ? milli(p.stock_inicial ?? 0, "el stock inicial") : 0;
   const caducidad = fechaONula(p.fecha_caducidad, "la fecha de caducidad");
-  if (p.precio_venta === undefined && !precioLibre) throw fallo(400, "Falta el precio de venta");
+  // Sin precio se puede dar de alta (alta rápida escaneando), pero no vender
 
   const db = c.env.DB;
   // Si se indica el stock que ya hay, se registra como una compra de "stock

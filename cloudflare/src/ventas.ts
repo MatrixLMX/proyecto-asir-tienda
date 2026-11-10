@@ -66,13 +66,14 @@ ventas.post("/ventas", async (c) => {
   const pedido = new Map<number, number>();
   for (const l of lineas) pedido.set(l.producto_id, (pedido.get(l.producto_id) ?? 0) + l.milli);
   const ids = [...pedido.keys()];
-  const productos = await filas<{ id: number; nombre: string; stock_milli: number; control_stock: number; precio_libre: number }>(
-    c, `SELECT id, nombre, stock_milli, control_stock, precio_libre FROM productos WHERE id IN (${ids.map(() => "?").join(",")})`, ...ids);
+  const productos = await filas<{ id: number; nombre: string; stock_milli: number; control_stock: number; precio_libre: number; precio_venta_cent: number }>(
+    c, `SELECT id, nombre, stock_milli, control_stock, precio_libre, precio_venta_cent FROM productos WHERE id IN (${ids.map(() => "?").join(",")})`, ...ids);
   if (productos.length !== ids.length) throw fallo(400, "Hay un producto que no existe en el ticket");
   for (const p of productos) {
     if (p.control_stock && p.stock_milli < pedido.get(p.id)!) {
       throw fallo(400, `Stock insuficiente de "${p.nombre}": quedan ${p.stock_milli / 1000}`);
     }
+    if (!p.precio_libre && !p.precio_venta_cent) throw fallo(400, `"${p.nombre}" todavía no tiene precio: pónselo en Catálogo`);
     if (p.precio_libre && lineas.some((l) => l.producto_id === p.id && !(l.precio! > 0 && l.precio! <= 1e7))) {
       throw fallo(400, `Escribe el importe de "${p.nombre}"`);
     }
