@@ -432,6 +432,57 @@ describe("informes", () => {
   });
 });
 
+describe("estadísticas", () => {
+  it("resume el periodo, lo compara con el anterior y reparte por producto, pago y mes", async () => {
+    // Venta de hace 40 días (periodo anterior) y venta de hoy con tarjeta; una merma hoy
+    const vieja = await vender({ lineas: [{ producto_id: 1, cantidad: 5 }] }, admin);
+    await db.prepare("UPDATE ventas SET fecha = (SELECT strftime('%Y-%m-%dT10:00:00', hoy, '-40 days') FROM v_ahora) WHERE id = ?").bind(vieja.id).run();
+    await vender({ lineas: [{ producto_id: 1, cantidad: 10 }], metodo_pago: "tarjeta" }, admin);
+    await admin("/mermas", "POST", { producto_id: 1, cantidad: 2, motivo: "roto" });
+
+    const e = await json(admin("/estadisticas"));
+    expect(e).toMatchObject({ dias: 30, agrupado: "dia" });
+    expect(e.actual).toMatchObject({
+      ventas_brutas: 12, devoluciones: 0, ventas_netas: 12, sin_iva: 10.91, iva: 1.09, coste: 5, beneficio_bruto: 5.91,
+      mermas: 1, beneficio: 4.91, margen: 45, tickets: 1, ticket_medio: 12, articulos_ticket: 10,
+      pagos: { efectivo: 0, tarjeta: 12, bizum: 0, fiado: 0 },
+    });
+    expect(e.anterior).toMatchObject({ ventas_netas: 6, tickets: 1, mermas: 0 });
+    expect(e.cambio).toMatchObject({ ventas_netas: 100, tickets: 0 });
+    expect(e.serie).toHaveLength(30);
+    expect(e.serie.at(-1)).toMatchObject({ facturacion: 12, beneficio: 4.91, tickets: 1 });
+    expect(e.productos).toEqual([expect.objectContaining({ producto: "Agua", unidades: 10, facturacion: 12, beneficio: 5.91, margen: 54.2, tickets: 1, sin_coste: false })]);
+    expect(e.categorias).toEqual([expect.objectContaining({ categoria: "Bebidas", facturacion: 12, peso: 100 })]);
+    expect(e.semana.reduce((t: number, d: { tickets: number }) => t + d.tickets, 0)).toBe(1);
+    expect(e.mensual).toHaveLength(12);
+    expect(e.mensual.at(-1)).toMatchObject({ beneficio: 4.91 });
+
+    // Un periodo largo se agrupa por meses
+    const año = await json(admin("/estadisticas?desde=2026-01-01&hasta=2026-12-31"));
+    expect(año).toMatchObject({ dias: 365, agrupado: "mes" });
+    expect(año.serie).toHaveLength(12);
+
+    // Comparar con lo que pida la pantalla: aquí, los mismos 30 días del año pasado
+    const conAño = await json(admin(`/estadisticas?desde=${e.desde}&hasta=${e.hasta}&comparar_desde=${Number(e.desde.slice(0, 4)) - 1}${e.desde.slice(4)}&comparar_hasta=${Number(e.hasta.slice(0, 4)) - 1}${e.hasta.slice(4)}`));
+    expect(conAño.anterior).toMatchObject({ tickets: 0, ventas_netas: 0 });
+    expect(conAño.cambio.ventas_netas).toBeNull();
+    expect((await admin(`/estadisticas?desde=${e.desde}&comparar_desde=${e.desde}&comparar_hasta=${e.hasta}`)).status).toBe(400);
+  });
+
+  it("las devoluciones restan y el dependiente no puede verlas", async () => {
+    const v = await vender({ lineas: [{ producto_id: 1, cantidad: 4 }] }, admin);
+    const t = await json(admin(`/ventas/${v.id}`));
+    await admin(`/ventas/${v.id}/devolucion`, "POST", { metodo: "efectivo", lineas: [{ linea_id: t.lineas[0].linea_id, cantidad: 1, repuesto: true }] });
+    const e = await json(admin("/estadisticas"));
+    expect(e.actual).toMatchObject({ ventas_brutas: 4.8, devoluciones: 1.2, num_devoluciones: 1, ventas_netas: 3.6 });
+    expect(e.productos[0]).toMatchObject({ unidades: 3, facturacion: 3.6 });
+
+    expect((await dependiente("/estadisticas")).status).toBe(403);
+    expect((await admin("/estadisticas?desde=2026-02-30")).status).toBe(400);
+    expect((await admin("/estadisticas?desde=2026-05-02&hasta=2026-05-01")).status).toBe(400);
+  });
+});
+
 describe("usuarios y contraseñas", () => {
   it("crea, cambia la contraseña y desactiva, y queda auditado", async () => {
     const r = await admin("/usuarios", "POST", { usuario: "prueba", nombre: " Prueba ", rol: "dependiente", password: "prueba1234" });

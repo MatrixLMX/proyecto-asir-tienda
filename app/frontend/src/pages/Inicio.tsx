@@ -62,7 +62,7 @@ export default function Inicio({ usuario, ir }: PropsPagina) {
         <div className="tarjeta mt-6 p-5">
           <div className="mb-4 flex items-baseline justify-between">
             <h2 className="font-semibold">Ventas de los últimos 30 días</h2>
-            <button className="flex items-center gap-1 text-sm font-medium text-marca-fuerte hover:underline" onClick={() => ir("informes")}>
+            <button className="flex items-center gap-1 text-sm font-medium text-marca-fuerte hover:underline" onClick={() => ir("estadisticas")}>
               Ver beneficios <ArrowRight className="size-4" />
             </button>
           </div>

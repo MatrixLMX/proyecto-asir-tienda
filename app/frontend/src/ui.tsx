@@ -234,10 +234,10 @@ export function Kpi({ titulo, valor, detalle, icono, tendencia, color = "marca" 
         <p className="text-sm font-medium text-suave">{titulo}</p>
         <div className={`rounded-xl p-2 ${fondos[color]}`}>{icono}</div>
       </div>
-      <p className="mt-3 text-2xl font-bold tracking-tight tabular-nums">{valor}</p>
-      <div className="mt-1 flex items-center gap-2 text-xs">
+      <p className="mt-3 truncate text-2xl font-bold tracking-tight tabular-nums" title={valor}>{valor}</p>
+      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
         {tendencia != null && isFinite(tendencia) && (
-          <span className={`inline-flex items-center gap-0.5 font-semibold ${tendencia >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+          <span className={`inline-flex items-center gap-0.5 whitespace-nowrap font-semibold ${tendencia >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
             {tendencia >= 0 ? <TrendingUp className="size-3.5" /> : <TrendingDown className="size-3.5" />}
             {Math.abs(tendencia).toFixed(0)} %
           </span>

@@ -14,7 +14,7 @@ const Stock = lazy(() => import("./pages/Stock"));
 const Caducidades = lazy(() => import("./pages/Caducidades"));
 const Compras = lazy(() => import("./pages/Compras"));
 const Catalogo = lazy(() => import("./pages/Catalogo"));
-const Informes = lazy(() => import("./pages/Informes"));
+const Estadisticas = lazy(() => import("./pages/Estadisticas"));
 const Ventas = lazy(() => import("./pages/Ventas"));
 const Usuarios = lazy(() => import("./pages/Usuarios"));
 const Fiado = lazy(() => import("./pages/Fiado"));
@@ -43,11 +43,11 @@ const SECCIONES: Seccion[] = [
   { id: "catalogo", nombre: "Catálogo", icono: Tags, pagina: Catalogo, soloAdmin: true },
   { id: "ofertas", nombre: "Ofertas", icono: BadgePercent, pagina: Ofertas, soloAdmin: true },
   { id: "recuento", nombre: "Recuento", icono: ClipboardCheck, pagina: Recuento, soloAdmin: true },
-  { id: "informes", nombre: "Beneficios", icono: BarChart3, pagina: Informes, soloAdmin: true },
+  { id: "estadisticas", nombre: "Estadísticas", icono: BarChart3, pagina: Estadisticas, soloAdmin: true },
   { id: "usuarios", nombre: "Usuarios", icono: Users, pagina: Usuarios, soloAdmin: true },
 ];
 
-const leerSeccion = () => window.location.hash.slice(1).split("/")[0] || "inicio";
+const leerSeccion = () => { const s = window.location.hash.slice(1).split("/")[0] || "inicio"; return s === "informes" ? "estadisticas" : s; };
 
 export default function App() {
   return (

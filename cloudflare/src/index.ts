@@ -9,6 +9,7 @@ import { avisoDiario, avisos } from "./avisos";
 import { catalogo } from "./catalogo";
 import { comprobarPassword, hashPassword } from "./claves";
 import { type C, type Ctx, type Entorno, type Usuario, cuerpo, escribir, fallo } from "./comun";
+import { estadisticas } from "./estadisticas";
 import { fiado } from "./fiado";
 import { inventario } from "./inventario";
 import { notas } from "./notas";
@@ -139,6 +140,7 @@ conAcceso.route("/", ofertas);
 conAcceso.route("/", fiado);
 conAcceso.route("/", inventario);
 conAcceso.route("/", avisos);
+conAcceso.route("/", estadisticas);
 
 conAcceso.all("*", () => { throw fallo(404, "No encontrado"); });
 
