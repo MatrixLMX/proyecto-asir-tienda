@@ -221,11 +221,12 @@ function Productos() {
           className={`mb-4 flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition ${soloSinPrecio ? "border-amber-500 bg-amber-500/15" : "border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/15"}`}>
           <Tag className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
           <span className="flex-1"><b>{numSinPrecio} {numSinPrecio === 1 ? "producto sin precio" : "productos sin precio"}</b>
-            <span className="block text-xs text-suave">No se pueden vender hasta que lo tengan. {soloSinPrecio ? "Toca uno para ponérselo." : "Toca aquí para verlos."}</span></span>
-          <span className="text-xs font-medium text-amber-700 dark:text-amber-300">{soloSinPrecio ? "Ver todos" : "Ver"}</span>
+            <span className="block text-xs text-suave">No se pueden vender hasta que lo tengan. {soloSinPrecio ? "Escribe el precio y pulsa Guardar." : "Toca aquí para ponerles precio."}</span></span>
+          <span className="text-xs font-medium text-amber-700 dark:text-amber-300">{soloSinPrecio ? "Ver todos" : "Poner precios"}</span>
         </button>
       )}
 
+      {soloSinPrecio ? <PonerPrecios productos={filas} alEditar={editar} /> : (
       <div className="tarjeta overflow-x-auto">
         {!productos.datos ? (
           <div className="space-y-2 p-5">{Array.from({ length: 8 }, (_, i) => <Esqueleto key={i} className="h-12" />)}</div>
@@ -239,14 +240,14 @@ function Productos() {
                 <th className="text-right">PVP</th>
                 <th className="text-right">Margen</th>
                 <th className="hidden text-right sm:table-cell">Stock</th>
-                <th />
+                <th className="hidden sm:table-cell" />
               </tr>
             </thead>
             <tbody>
               {filas.map((p) => {
                 const margen = margenDe(p.precio_venta, p.iva, p.coste_medio);
                 return (
-                  <tr key={p.id} className={p.activo ? "" : "opacity-50"}>
+                  <tr key={p.id} className={`cursor-pointer hover:bg-superficie-2/60 ${p.activo ? "" : "opacity-50"}`} onClick={() => editar(p)}>
                     <td>
                       <p className="font-medium">{p.nombre} {!p.activo && <Insignia color="gris">de baja</Insignia>}</p>
                       <p className="text-xs text-tenue">{p.categoria} · IVA {p.iva} %{p.controla_caducidad ? " · caduca" : ""}{p.codigo_barras ? ` · ${p.codigo_barras}` : ""}</p>
@@ -256,8 +257,8 @@ function Productos() {
                     <td className="text-right font-semibold tabular-nums">{p.precio_libre ? <span className="text-xs font-medium text-tenue">libre</span> : sinPrecio(p) ? <Insignia color="ambar">sin precio</Insignia> : euros(p.precio_venta)}</td>
                     <td className="text-right">{p.coste_medio && !p.precio_libre && !sinPrecio(p) ? <Insignia color={margen >= 25 ? "verde" : margen >= 10 ? "ambar" : "rojo"}>{pct(margen)}</Insignia> : <span className="text-tenue">—</span>}</td>
                     <td className="hidden text-right tabular-nums sm:table-cell">{p.control_stock ? cantidad(p.stock_actual, p.unidad_medida) : <span className="text-tenue">—</span>}</td>
-                    <td className="text-right">
-                      <button className="rounded-lg p-1.5 text-tenue hover:bg-superficie-2 hover:text-texto" onClick={() => editar(p)} aria-label={`Editar ${p.nombre}`}>
+                    <td className="hidden text-right sm:table-cell">
+                      <button className="rounded-lg p-1.5 text-tenue hover:bg-superficie-2 hover:text-texto" onClick={(e) => { e.stopPropagation(); editar(p); }} aria-label={`Editar ${p.nombre}`}>
                         <Pencil className="size-4" />
                       </button>
                     </td>
@@ -268,6 +269,7 @@ function Productos() {
           </table>
         )}
       </div>
+      )}
 
       {importando && <Suspense fallback={null}><Importar abierto alCerrar={() => setImportando(false)} /></Suspense>}
       {escaneando && <Suspense fallback={null}><AltaRapida abierto alCerrar={() => setEscaneando(false)} /></Suspense>}
@@ -569,3 +571,51 @@ function Fila({ children, inactivo, alEditar }: { children: ReactNode; inactivo:
   );
 }
 
+
+/** Lista para poner precio a los productos que no lo tienen, sin abrir uno por uno. */
+function PonerPrecios({ productos, alEditar }: { productos: ProductoAdmin[]; alEditar: (p: ProductoAdmin) => void }) {
+  if (!productos.length) return <p className="tarjeta p-6 text-center text-sm text-tenue">Ninguno coincide con la búsqueda.</p>;
+  return <div className="space-y-2">{productos.map((p) => <FilaPrecio key={p.id} p={p} alEditar={alEditar} />)}</div>;
+}
+
+function FilaPrecio({ p, alEditar }: { p: ProductoAdmin; alEditar: (p: ProductoAdmin) => void }) {
+  const avisar = useAviso();
+  const [pvp, setPvp] = useState<number | null>(null);
+  const [coste, setCoste] = useState<number | null>(p.coste_medio ? redondear(p.coste_medio) : null);
+  const [enviando, setEnviando] = useState(false);
+  const margen = pvp && coste ? margenDe(pvp, p.iva, coste) : null;
+  const porKg = p.unidad_medida === "kg" ? "/kg" : "";
+
+  async function guardar(e: FormEvent) {
+    e.preventDefault();
+    if (!pvp) return;
+    setEnviando(true);
+    try {
+      const cambioCoste = coste != null && coste !== redondear(p.coste_medio) ? { coste_medio: coste } : {};
+      await patch(`/productos/${p.id}`, { precio_venta: pvp, ...cambioCoste });
+      avisar("ok", `${p.nombre}: ${euros(pvp)}`);
+      emitirCambio();
+    } catch (err) { avisar("error", (err as Error).message); setEnviando(false); }
+  }
+
+  return (
+    <form onSubmit={guardar} className="tarjeta grid grid-cols-2 items-end gap-2 p-3 sm:grid-cols-[1fr_8rem_8rem_auto] sm:gap-3">
+      <button type="button" className="col-span-2 min-w-0 text-left sm:col-span-1 sm:self-center" onClick={() => alEditar(p)} title="Abrir la ficha completa">
+        <p className="truncate font-medium">{p.nombre}</p>
+        <p className="truncate text-xs text-tenue">{p.categoria} · IVA {p.iva} %{p.codigo_barras ? ` · ${p.codigo_barras}` : ""}</p>
+      </button>
+      <div>
+        <label className="etiqueta" htmlFor={`pv-${p.id}`}>Venta, con IVA (€{porKg})</label>
+        <CampoNumero id={`pv-${p.id}`} placeholder="0,00" valor={pvp} alCambiar={setPvp} />
+      </div>
+      <div>
+        <label className="etiqueta" htmlFor={`pc-${p.id}`}>Compra, sin IVA (€{porKg})</label>
+        <CampoNumero id={`pc-${p.id}`} decimales={4} placeholder="Opcional" valor={coste} alCambiar={setCoste} />
+      </div>
+      <div className="col-span-2 flex items-center justify-between gap-3 sm:col-span-1 sm:flex-col sm:items-end sm:gap-1">
+        <span className={`text-xs ${margen != null && margen < 0 ? "text-red-600 dark:text-red-400" : "text-tenue"}`}>{margen != null ? `Margen ${pct(margen)}` : ""}</span>
+        <button className="boton px-4" disabled={!pvp || enviando}>Guardar</button>
+      </div>
+    </form>
+  );
+}
