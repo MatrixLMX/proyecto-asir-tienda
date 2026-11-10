@@ -29,7 +29,7 @@ const nombreSugerido = (r: InfoCodigo) => {
   return `${e.nombre}${marca}${tam}`.slice(0, 100);
 };
 
-const vacio = () => ({ codigo: "", nombre: "", stock: null as number | null, caducidad: "" });
+const vacio = () => ({ codigo: "", nombre: "", stock: null as number | null, caducidad: "", pvp: null as number | null, coste: null as number | null });
 
 /** Dar de alta productos uno detrás de otro escaneándolos con el móvil.
  *  Solo lo imprescindible; el precio se pone después (quedan como "sin precio"). */
@@ -78,6 +78,7 @@ export default function AltaRapida({ abierto, alCerrar }: { abierto: boolean; al
     try {
       await post("/productos", {
         nombre: d.nombre.trim(), codigo_barras: d.codigo || null, categoria_id: categoria, iva_id: iva, unidad_medida: "unidad",
+        precio_venta: d.pvp ?? 0, coste_compra: d.coste ?? 0,
         stock_inicial: d.stock ?? 0, controla_caducidad: !!d.caducidad, fecha_caducidad: d.stock && d.caducidad ? d.caducidad : null,
       });
       guardarPreferencia(categoria, iva);
@@ -88,12 +89,16 @@ export default function AltaRapida({ abierto, alCerrar }: { abierto: boolean; al
     } catch (err) { avisar("error", (err as Error).message); } finally { setEnviando(false); }
   }
 
+  const pctIva = ivas.datos?.find((x) => x.id === iva)?.porcentaje;
+  const sinIva = d.pvp && pctIva != null ? d.pvp / (1 + pctIva / 100) : null;
+  const margen = sinIva && d.coste ? Math.round(((sinIva - d.coste) / sinIva) * 100) : null;
+
   const listo = !!d.nombre.trim() && !!categoria && !!iva && !aviso?.startsWith("Ya está");
 
   return (
     <Modal abierto={abierto} alCerrar={alCerrar} titulo="Alta rápida escaneando">
       <form onSubmit={(e) => guardar(e, true)} className="space-y-4">
-        <p className="text-sm text-suave">Escanea, revisa el nombre y guarda. El precio lo pones después: estos productos salen como <b>sin precio</b> en Catálogo y no se pueden vender hasta que lo tengan.</p>
+        <p className="text-sm text-suave">Escanea, revisa el nombre y guarda. Los precios puedes ponerlos aquí o después: sin precio de venta salen como <b>sin precio</b> en Catálogo y no se pueden vender hasta que lo tengan.</p>
 
         <div>
           <label className="etiqueta" htmlFor="ar-codigo">Código de barras</label>
@@ -125,6 +130,19 @@ export default function AltaRapida({ abierto, alCerrar }: { abierto: boolean; al
               <option value="">Elige…</option>{ivas.datos?.map((c) => <option key={c.id} value={c.id}>{c.porcentaje} %</option>)}
             </select>
           </div>
+          <div>
+            <label className="etiqueta" htmlFor="ar-pvp">Precio de venta (€)</label>
+            <CampoNumero id="ar-pvp" placeholder="Con IVA" valor={d.pvp} alCambiar={(n) => setD({ ...d, pvp: n })} />
+          </div>
+          <div>
+            <label className="etiqueta" htmlFor="ar-coste">Precio de compra (€)</label>
+            <CampoNumero id="ar-coste" decimales={4} placeholder="Sin IVA, factura" valor={d.coste} alCambiar={(n) => setD({ ...d, coste: n })} />
+          </div>
+          {margen != null && (
+            <p className={`col-span-2 -mt-1 text-xs ${margen < 0 ? "text-red-600 dark:text-red-400" : "text-tenue"}`}>
+              Margen: {margen} %{margen < 0 ? " — lo vendes por debajo de lo que te cuesta" : ""}
+            </p>
+          )}
           <div>
             <label className="etiqueta" htmlFor="ar-stock">Cuántos hay</label>
             <CampoNumero id="ar-stock" decimales={0} placeholder="0" valor={d.stock} alCambiar={(n) => setD({ ...d, stock: n })} />
