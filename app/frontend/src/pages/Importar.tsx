@@ -1,6 +1,6 @@
 import { useState, type ChangeEvent } from "react";
 import { Download, FileSpreadsheet, Upload } from "lucide-react";
-import { descargarCsv, post } from "../api";
+import { post } from "../api";
 import { Esqueleto, Modal, emitirCambio, useAviso } from "../ui";
 
 type Valor = string | number | boolean | Date | null;
@@ -13,19 +13,10 @@ interface Informe { nuevos: number; errores: number; existentes: number; filas: 
 const POR_ENVIO = 200;
 const trozos = <T,>(l: T[]) => Array.from({ length: Math.ceil(l.length / POR_ENVIO) }, (_, i) => l.slice(i * POR_ENVIO, (i + 1) * POR_ENVIO));
 
-const COLUMNAS: [string, string][] = [
-  ["nombre", "nombre"], ["codigo_barras", "codigo_barras"], ["categoria", "categoria"], ["proveedor", "proveedor"], ["iva", "iva"], ["unidad", "unidad"],
-  ["precio", "precio"], ["coste", "coste"], ["stock", "stock"], ["stock_minimo", "stock_minimo"], ["caducidad", "caducidad"], ["vida_util_dias", "vida_util_dias"], ["control_stock", "control_stock"],
-];
-const EJEMPLO = [
-  { nombre: "Coca-Cola lata 33 cl", codigo_barras: "5449000000996", categoria: "Bebidas", proveedor: "Coca-Cola", iva: 10, unidad: "unidad", precio: 1.2, coste: 0.55, stock: 24, stock_minimo: 6, caducidad: "", vida_util_dias: "", control_stock: "si" },
-  { nombre: "Barra de pan", codigo_barras: "", categoria: "Alimentación", proveedor: "", iva: 4, unidad: "unidad", precio: 0.9, coste: 0.4, stock: "", stock_minimo: "", caducidad: "", vida_util_dias: "", control_stock: "no" },
-];
-
 const clave = (t: unknown) => String(t ?? "").normalize("NFD").replace(/\p{M}/gu, "").trim().toLowerCase().replace(/[\s-]+/g, "_").replace(/[^\w]/g, "");
 const ALIAS: Record<string, string> = {
   producto: "nombre", codigo: "codigo_barras", ean: "codigo_barras", pvp: "precio", precio_venta: "precio", precio_de_venta: "precio", coste_sin_iva: "coste", precio_compra: "coste", precio_de_compra: "coste",
-  iva_: "iva", unidad_medida: "unidad", cantidad: "stock", minimo: "stock_minimo", fecha_caducidad: "caducidad", vida_util: "vida_util_dias",
+  iva_: "iva", unidad_medida: "unidad", codigo_de_barras: "codigo_barras", se_vende_por: "unidad", dias_que_dura: "vida_util_dias", llevar_stock: "control_stock", cantidad: "stock", minimo: "stock_minimo", fecha_caducidad: "caducidad", vida_util: "vida_util_dias",
 };
 
 /** Separador ; (Excel en español) o , con comillas. */
@@ -144,12 +135,12 @@ export default function Importar({ abierto, alCerrar }: { abierto: boolean; alCe
   return (
     <Modal abierto={abierto} alCerrar={cerrar} titulo="Importar productos desde Excel" ancho="max-w-lg">
       <div className="space-y-4 text-sm">
-        <p className="text-suave">Hace falta nombre, categoría, IVA y precio. Lo que ya está en el catálogo (mismo nombre o código) no se toca, así que puedes repetir la importación sin miedo.</p>
+        <p className="text-suave">Hace falta nombre, categoría e IVA. El precio se puede dejar vacío y ponerlo después. Lo que ya está en el catálogo (mismo nombre o código) no se toca, así que puedes repetir la importación sin miedo.</p>
         <div className="flex flex-wrap gap-2">
           <label className="boton cursor-pointer"><Upload className="size-4" /> Elegir fichero
             <input type="file" className="sr-only" accept=".xlsx,.csv,.txt" onChange={alElegir} disabled={ocupado} />
           </label>
-          <button type="button" className="boton-sec" onClick={() => descargarCsv("plantilla_productos", EJEMPLO, COLUMNAS)}><Download className="size-4" /> Plantilla</button>
+          <a className="boton-sec" href="/plantilla_productos.xlsx" download><Download className="size-4" /> Plantilla de Excel</a>
         </div>
         {ocupado && <Esqueleto className="h-24" />}
         {!ocupado && informe && (

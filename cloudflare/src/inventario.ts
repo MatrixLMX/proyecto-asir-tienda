@@ -71,7 +71,7 @@ function validarFila(f: Datos, ivas: { id: number; porcentaje: number }[]): Fila
   if (typeof f.iva !== "number") throw fallo(400, "falta el IVA");
   const iva = ivas.find((i) => i.porcentaje === f.iva);
   if (!iva) throw fallo(400, `no existe el IVA del ${f.iva} %`);
-  if (f.precio === undefined || f.precio === null) throw fallo(400, "falta el precio");
+  // Sin precio también entra: queda "sin precio" en Catálogo y no se vende hasta tenerlo
   const caducidad = fechaONula(f.caducidad, "la fecha de caducidad");
   const vida = f.vida_util_dias === undefined || f.vida_util_dias === null ? null : entero(f.vida_util_dias, "la vida útil", 36500) || null;
   const stock = milli(f.stock ?? 0, "el stock");
@@ -80,7 +80,7 @@ function validarFila(f: Datos, ivas: { id: number; porcentaje: number }[]): Fila
   if (unidad === "unidad" && stock % 1000 !== 0) throw fallo(400, "el stock va sin decimales en productos por unidad");
   return {
     nombre, codigo: texto(f.codigo_barras, "el código de barras", 20), categoria: texto(f.categoria, "la categoría", 50, true)!,
-    proveedor: texto(f.proveedor, "el proveedor", 80), iva_id: iva.id, unidad, precio: cent(f.precio, "el precio"),
+    proveedor: texto(f.proveedor, "el proveedor", 80), iva_id: iva.id, unidad, precio: cent(f.precio ?? 0, "el precio"),
     coste: dm(f.coste ?? 0, "el coste"), stock: control ? stock : 0, minimo: milli(f.stock_minimo ?? 0, "el stock mínimo"),
     caducidad, vida, controla, control,
   };

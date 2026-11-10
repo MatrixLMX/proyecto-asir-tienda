@@ -339,7 +339,8 @@ describe("importar catálogo", () => {
 
   it("con un error no importa nada y dice qué fila es", async () => {
     const r = await json(admin("/productos/importar", "POST", { filas: [fila, { ...fila, nombre: "Malo", codigo_barras: "", iva: 7 }, { ...fila, nombre: "", codigo_barras: "" }, { ...fila, nombre: "Sin precio", codigo_barras: "", precio: null }] }));
-    expect(r).toMatchObject({ errores: 3, nuevos: 1, importado: false });
+    // La fila sin precio es válida: queda "sin precio" en el catálogo
+    expect(r).toMatchObject({ errores: 2, nuevos: 2, importado: false });
     expect(r.filas[1]).toMatchObject({ fila: 2, estado: "error", detalle: "no existe el IVA del 7 %" });
     expect(await db.prepare("SELECT COUNT(*) n FROM productos WHERE nombre = 'Galletas'").first<number>("n")).toBe(0);
     expect((await admin("/productos/importar", "POST", { filas: Array.from({ length: 201 }, () => fila) })).status).toBe(400);
