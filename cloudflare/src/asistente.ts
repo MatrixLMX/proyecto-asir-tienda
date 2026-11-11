@@ -9,7 +9,7 @@ import { type C, type Ctx, type Datos, cuerpo, fallo, filas, hoy, normalizar } f
 
 export const asistente = new Hono<Ctx>();
 
-const MODELO = "gemini-flash-lite-latest";
+export const MODELO = "gemini-flash-lite-latest";
 const MAX_VUELTAS = 6;
 const MAX_MENSAJES = 20;
 
@@ -164,24 +164,23 @@ function instrucciones(rol: string, dia: string) {
 type Parte = { text?: string; functionCall?: { name: string; args?: Datos }; functionResponse?: unknown; [k: string]: unknown };
 type Mensaje = { role: "user" | "model"; parts: Parte[] };
 
-class ErrorProveedor extends Error {
+export class ErrorProveedor extends Error {
   constructor(readonly estado: number) { super(`Gemini respondió ${estado}`); }
 }
 
-async function llamar(c: C, cuerpoPeticion: unknown, reintentar = true): Promise<Parte[]> {
-  const modelo = c.env.LLM_MODEL || MODELO;
+export async function llamar(c: C, cuerpoPeticion: unknown, reintentar = true, modelo = c.env.LLM_MODEL || MODELO, espera = 25000): Promise<Parte[]> {
   // La clave va en una cabecera, no en la URL, para que no acabe en ningún registro
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": c.env.GOOGLE_API_KEY! },
     body: JSON.stringify(cuerpoPeticion),
-    signal: AbortSignal.timeout(25000),
+    signal: AbortSignal.timeout(espera),
   });
   if (!r.ok) {
     await r.body?.cancel();
     if (reintentar && (r.status === 429 || r.status >= 500)) {
       await new Promise((listo) => setTimeout(listo, 2000));
-      return llamar(c, cuerpoPeticion, false);
+      return llamar(c, cuerpoPeticion, false, modelo, espera);
     }
     throw new ErrorProveedor(r.status);
   }

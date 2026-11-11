@@ -672,3 +672,60 @@ describe("rutas desconocidas", () => {
     expect((await pedir("/no-existe")).status).toBe(401);
   });
 });
+
+describe("leer factura con foto", () => {
+  const gemini = (leido: unknown) => Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify(leido) }] } }] });
+  const foto = { tipo: "image/jpeg", datos: "QUJDRA==" };
+  const factura = (lineas: unknown[]) => ({
+    es_factura: true, proveedor: "Distribuciones Bebidas Norte S.L.", numero_factura: "F-77", fecha: "2026-11-10", total_sin_iva: 30, lineas,
+  });
+  const linea = (descripcion: string, extra: Record<string, unknown> = {}) =>
+    ({ descripcion, es_producto: true, cantidad: 24, unidades_por_bulto: 24, por_kg: false, coste_unitario: 0.45, iva: 10, ...extra });
+
+  it("empareja por código y por nombre, y aprende la descripción al guardar la compra", async () => {
+    const prov = await json(admin("/proveedores", "POST", { nombre: "Bebidas Norte" }));
+    const espia = vi.spyOn(globalThis, "fetch").mockImplementation(async () => gemini(factura([
+      linea("AGUA MINERAL 1,5L", { codigo_barras: "111" }), // el código 111 no es un EAN válido: va por nombre
+      linea("YOGUR NATURAL 125G"),
+      linea("REFRESCO COLA LATA"),
+      linea("PORTES", { es_producto: false, cantidad: 1, coste_unitario: 5 }),
+    ])));
+    const r = await json(admin("/compras/leer-factura", "POST", foto));
+    expect(espia.mock.calls[0]![0]).toContain("gemini-flash-latest");
+    expect(r.proveedor_id).toBe(prov.id);
+    expect(r.numero_factura).toBe("F-77");
+    expect(r.lineas.map((l: any) => [l.producto_id, l.como])).toEqual([[1, "nombre"], [3, "nombre"], [null, null], [null, null]]);
+    expect(r.lineas[3].es_producto).toBe(false);
+
+    // Se guarda la compra diciendo que "REFRESCO COLA LATA" es el agua (producto 1)
+    await admin("/compras", "POST", { proveedor_id: prov.id, lineas: [{ producto_id: 1, cantidad: 24, coste_unitario: 0.45, texto_factura: "REFRESCO COLA LATA" }] });
+    expect(await stock(1)).toBe(44000);
+    const otra = await json(admin("/compras/leer-factura", "POST", foto));
+    expect(otra.lineas[2]).toMatchObject({ producto_id: 1, como: "aprendido" });
+  });
+
+  it("si el modelo bueno está saturado usa el ligero", async () => {
+    const espia = vi.spyOn(globalThis, "fetch")
+      .mockImplementationOnce(async () => new Response("{}", { status: 503 }))
+      .mockImplementation(async () => gemini(factura([linea("Patatas", { por_kg: true, cantidad: 10, coste_unitario: 0.6 })])));
+    const r = await json(admin("/compras/leer-factura", "POST", foto));
+    expect(espia.mock.calls[1]![0]).toContain("gemini-flash-lite-latest");
+    expect(r.lineas[0]).toMatchObject({ producto_id: 2, por_kg: true, cantidad: 10 });
+  });
+
+  it("rechaza lo que no es una factura, ficheros raros y al dependiente", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => gemini({ es_factura: false, lineas: [] }));
+    expect((await admin("/compras/leer-factura", "POST", foto)).status).toBe(400);
+    expect((await admin("/compras/leer-factura", "POST", { tipo: "text/html", datos: "QUJD" })).status).toBe(400);
+    expect((await admin("/compras/leer-factura", "POST", { tipo: "image/jpeg", datos: "<script>" })).status).toBe(400);
+    expect((await dependiente("/compras/leer-factura", "POST", foto)).status).toBe(403);
+    expect((await admin("/compras/leer-factura", "POST", { paginas: Array(6).fill(foto) })).status).toBe(400);
+  });
+
+  it("acepta varias páginas en una sola petición", async () => {
+    const espia = vi.spyOn(globalThis, "fetch").mockImplementation(async () => gemini(factura([linea("Agua")])));
+    expect((await admin("/compras/leer-factura", "POST", { paginas: [foto, { tipo: "application/pdf", datos: "QUJD" }] })).status).toBe(200);
+    const partes = JSON.parse(String(espia.mock.calls[0]![1]!.body)).contents[0].parts;
+    expect(partes.map((p: any) => p.inlineData?.mimeType ?? "texto")).toEqual(["image/jpeg", "application/pdf", "texto"]);
+  });
+});

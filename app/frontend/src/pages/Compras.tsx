@@ -1,9 +1,13 @@
-import { useState } from "react";
-import { CalendarClock, ClipboardList, Download, PackageCheck, Plus, Trash2, Truck } from "lucide-react";
+import { Suspense, lazy, useState } from "react";
+import { CalendarClock, Camera, ClipboardList, Download, PackageCheck, Plus, Trash2, Truck } from "lucide-react";
 import { borrar, cantidad, descargarCsv, euros, fecha, fechaHora, post } from "../api";
 import { BotonEscanear, useLectorGlobal } from "../escaner";
 import { Cabecera, CampoNumero, Confirmar, Esqueleto, Modal, Pestañas, Vacio, emitirCambio, useAviso, useDatos } from "../ui";
 import { ElegirProveedor } from "./Catalogo";
+import type { CompraLeida } from "./LeerFactura";
+
+// Solo se descarga si se usa
+const LeerFactura = lazy(() => import("./LeerFactura"));
 
 export interface ProductoAdmin {
   id: number;
@@ -27,13 +31,16 @@ export interface ProductoAdmin {
   precio_libre: number;
   acceso_rapido: number;
 }
-interface Linea { clave: number; producto_id: number; cantidad: number | null; coste_unitario: number | null; fecha_caducidad: string }
+interface Linea {
+  clave: number; producto_id: number; cantidad: number | null; coste_unitario: number | null; fecha_caducidad: string;
+  texto_factura?: string; // descripción en la factura leída de una foto
+}
 
 interface Sugerencia {
   id: number; producto: string; proveedor: string | null; proveedor_id: number | null; unidad_medida: string;
   stock_actual: number; stock_minimo: number; cantidad_sugerida: number; coste_medio: number; coste_estimado: number;
 }
-interface Precarga { proveedor: number | ""; lineas: Linea[] }
+interface Precarga { proveedor: number | ""; lineas: Linea[]; factura?: string }
 
 let siguiente = 0;
 const lineaVacia = (): Linea => ({ clave: siguiente++, producto_id: 0, cantidad: 1, coste_unitario: null, fecha_caducidad: "" });
@@ -45,7 +52,15 @@ export default function Compras() {
   const [precarga, setPrecarga] = useState<Precarga | null>(null);
   const [version, setVersion] = useState(0);
 
+  const [leyendo, setLeyendo] = useState(false);
+  const avisar = useAviso();
+
   const cargarPedido = (p: Precarga) => { setPrecarga(p); setVersion((v) => v + 1); setVista("nueva"); };
+  const cargarFactura = (c: CompraLeida) => {
+    setLeyendo(false);
+    cargarPedido({ proveedor: c.proveedor, factura: c.factura, lineas: c.lineas.map((l) => ({ ...l, clave: siguiente++, fecha_caducidad: "" })) });
+    avisar("ok", "Factura pasada a la compra: pon las caducidades que falten y pulsa Guardar compra.");
+  };
 
   return (
     <>
@@ -54,7 +69,16 @@ export default function Compras() {
           { id: "nueva", nombre: "Registrar compra" }, { id: "pedido", nombre: "Qué pedir" }, { id: "historial", nombre: "Historial" },
         ]} />
       </Cabecera>
+      {vista === "nueva" && (
+        <button onClick={() => setLeyendo(true)}
+          className="mb-4 flex w-full items-center gap-3 rounded-2xl border border-marca-500/40 bg-marca-500/10 px-4 py-3 text-left text-sm transition hover:bg-marca-500/15">
+          <Camera className="size-5 shrink-0 text-marca-fuerte" />
+          <span className="flex-1"><b>Leer factura con foto</b>
+            <span className="block text-xs text-suave">Haz una foto a la factura o albarán y se rellena la compra sola, con los productos nuevos incluidos.</span></span>
+        </button>
+      )}
       {vista === "nueva" && <NuevaCompra key={version} inicial={precarga} />}
+      {leyendo && <Suspense fallback={null}><LeerFactura alCerrar={() => setLeyendo(false)} alCargar={cargarFactura} /></Suspense>}
       {vista === "pedido" && <PedidoSugerido alCargar={cargarPedido} />}
       {vista === "historial" && <Historial />}
     </>
@@ -66,7 +90,7 @@ function NuevaCompra({ inicial }: { inicial: Precarga | null }) {
   const proveedores = useDatos<{ id: number; nombre: string }[]>("/proveedores");
   const avisar = useAviso();
   const [proveedor, setProveedor] = useState<number | "">(inicial?.proveedor ?? "");
-  const [factura, setFactura] = useState("");
+  const [factura, setFactura] = useState(inicial?.factura ?? "");
   const [lineas, setLineas] = useState<Linea[]>(inicial?.lineas.length ? inicial.lineas : [lineaVacia()]);
   const [guardando, setGuardando] = useState(false);
 
@@ -140,7 +164,7 @@ function NuevaCompra({ inicial }: { inicial: Precarga | null }) {
               return (
                 <div key={l.clave} className="animar-entrada rounded-2xl border border-borde bg-superficie-2/50 p-4">
                   <div className="mb-3 flex items-center justify-between">
-                    <span className="text-xs font-semibold text-tenue">LÍNEA {i + 1}</span>
+                    <span className="mr-2 min-w-0 flex-1 truncate text-xs font-semibold text-tenue">LÍNEA {i + 1}{l.texto_factura ? <span className="font-normal"> · en la factura: {l.texto_factura}</span> : null}</span>
                     {lineas.length > 1 && (
                       <button className="text-tenue hover:text-rose-500" onClick={() => setLineas((ls) => ls.filter((x) => x.clave !== l.clave))} aria-label="Quitar línea">
                         <Trash2 className="size-4" />

@@ -29,7 +29,7 @@ export async function reiniciar() {
     // Con stock de sobra, para que los triggers de borrado no choquen con el CHECK
     db.prepare("UPDATE productos SET stock_milli = 1000000000"),
     ...["suscripciones_push", "ofertas", "ajustes_stock", "devoluciones_lotes", "lineas_devolucion", "devoluciones", "pagos_fiado", "notas", "conversaciones", "mermas_lotes", "mermas", "cierres_caja", "lotes_consumidos", "lineas_venta", "ventas",
-      "lineas_compra", "compras", "lotes", "productos", "intentos_login", "clientes", "contexto_app", "usuarios_app", "auditoria"]
+      "alias_factura", "lineas_compra", "compras", "lotes", "productos", "intentos_login", "clientes", "contexto_app", "usuarios_app", "auditoria"]
       .map((t) => db.prepare(`DELETE FROM ${t}`)),
     db.prepare(`INSERT INTO usuarios_app (id, usuario, nombre, password_hash, rol) VALUES
       (1, 'jefe', 'Jefe', ?1, 'admin'), (2, 'dep', 'Dependiente', ?1, 'dependiente')`).bind(h),

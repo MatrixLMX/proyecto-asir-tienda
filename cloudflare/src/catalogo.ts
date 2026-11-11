@@ -4,6 +4,7 @@ import {
   type C, type Campo, type Ctx, type Datos, actualizar, booleano, cambios, cent, cuerpo, dm, entero, enteroONulo,
   enteroUrl, escribir, fallo, fechaONula, filas, idRuta, lista, milli, normalizar, ordenar, soloAdmin, texto,
 } from "./comun";
+import { claveAlias } from "./facturas";
 
 export const catalogo = new Hono<Ctx>();
 
@@ -114,6 +115,8 @@ catalogo.post("/compras", soloAdmin, async (c) => {
     cantidad: milli(l?.cantidad, "la cantidad"),
     coste: dm(l?.coste_unitario, "el coste"),
     caducidad: fechaONula(l?.fecha_caducidad, "la fecha de caducidad"),
+    // Descripción en la factura leída de una foto: se aprende para la próxima
+    alias: claveAlias(texto(l?.texto_factura, "la descripción", 200) ?? ""),
   }));
   if (lineas.some((l) => !(l.cantidad > 0))) throw fallo(400, "Revisa la cantidad");
 
@@ -129,9 +132,14 @@ catalogo.post("/compras", soloAdmin, async (c) => {
     }
   }
 
+  const proveedor = enteroONulo(d.proveedor_id, "el proveedor");
   const r = await escribir(c, [
-    pasoCompra(c, enteroONulo(d.proveedor_id, "el proveedor"), texto(d.numero_factura, "la factura", 40), texto(d.notas, "las notas", 255)),
+    pasoCompra(c, proveedor, texto(d.numero_factura, "la factura", 40), texto(d.notas, "las notas", 255)),
     ...lineas.map((l) => pasoLineaCompra(c, "?", l.cantidad, l.coste, l.caducidad, l.producto_id)),
+    ...lineas.filter((l) => l.alias).map((l) => c.env.DB.prepare(
+      `INSERT INTO alias_factura (proveedor_id, texto, producto_id) VALUES (?, ?, ?)
+       ON CONFLICT (proveedor_id, texto) DO UPDATE SET producto_id = excluded.producto_id`,
+    ).bind(proveedor ?? 0, l.alias, l.producto_id)),
     c.env.DB.prepare(`SELECT id, total_cent / 100.0 AS total_sin_iva FROM compras WHERE id = ${estaCompra}`),
   ]);
   return c.json(r.at(-1)!.results[0]);
