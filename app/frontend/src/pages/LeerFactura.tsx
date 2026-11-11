@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Camera, FileText, ImagePlus, Loader2, Sparkles, Trash2, TriangleAlert } from "lucide-react";
+import { Camera, FileText, Image as ImageIcon, ImagePlus, Loader2, Plus, Sparkles, Trash2, TriangleAlert } from "lucide-react";
 import { euros, patch, post } from "../api";
 import { CampoNumero, Insignia, Modal, emitirCambio, useAviso, useDatos } from "../ui";
 import { ElegirProveedor } from "./Catalogo";
@@ -23,11 +23,11 @@ export interface CompraLeida {
   lineas: { producto_id: number; cantidad: number; coste_unitario: number; texto_factura: string }[];
 }
 
-// "nuevo": dar de alta · "no": no se añade (portes, envases…) · número: producto del catálogo
+// "nuevo": dar de alta · "no": quitada de la lista (portes, envases…) · número: producto del catálogo
 type Destino = "nuevo" | "no" | number;
 interface Fila {
   clave: number; leida: LineaLeida; destino: Destino; cantidad: number | null; coste: number | null;
-  nombre: string; categoria: number; iva: number; pvp: number | null; caduca: boolean;
+  nombre: string; categoria: number; iva: number; pvp: number | null; caduca: boolean; porKg: boolean;
 }
 
 const CLAVE = "tienda_leer_factura";
@@ -82,6 +82,7 @@ export default function LeerFactura({ alCerrar, alCargar }: { alCerrar: () => vo
   const [proveedor, setProveedor] = useState<number | "">("");
   const [factura, setFactura] = useState("");
   const [guardando, setGuardando] = useState(false);
+  const [verFoto, setVerFoto] = useState(false);
   const camara = useRef<HTMLInputElement>(null);
   const galeria = useRef<HTMLInputElement>(null);
 
@@ -108,11 +109,22 @@ export default function LeerFactura({ alCerrar, alCargar }: { alCerrar: () => vo
         clave: i, leida: l,
         destino: l.producto_id ?? (l.es_producto ? "nuevo" : "no"),
         cantidad: l.cantidad || null, coste: l.coste_unitario || null,
-        nombre: bonito(l.descripcion), categoria: cat, iva: ivaId(l.iva), pvp: null, caduca: false,
+        nombre: bonito(l.descripcion), categoria: cat, iva: ivaId(l.iva), pvp: precioDe(l.producto_id), caduca: false, porKg: l.por_kg,
       })));
     } catch (e) { avisar("error", (e as Error).message); } finally { setLeyendo(false); }
   }
 
+  const precioDe = (id: number | null) => productos.datos?.find((p) => p.id === id)?.precio_venta || null;
+  const cambiarDestino = (f: Fila, v: string) => {
+    const destino: Destino = v === "nuevo" ? "nuevo" : Number(v);
+    // Al elegir un producto del catálogo se trae su precio de venta actual
+    editar(f.clave, { destino, pvp: destino === "nuevo" ? f.pvp : precioDe(destino) });
+  };
+  const añadirFila = () => setFilas((fs) => [...fs, {
+    clave: Math.max(0, ...fs.map((x) => x.clave)) + 1, destino: "nuevo", cantidad: 1, coste: null, nombre: "", categoria: ultimaCategoria(),
+    iva: 0, pvp: null, caduca: false, porKg: false,
+    leida: { descripcion: "", codigo_barras: null, es_producto: true, cantidad: 1, por_kg: false, unidades_por_bulto: 1, coste_unitario: 0, iva: null, importe: null, producto_id: null, como: null },
+  }]);
   const editar = (clave: number, cambio: Partial<Fila>) => setFilas((fs) => fs.map((f) => (f.clave === clave ? { ...f, ...cambio } : f)));
 
   async function añadirProveedor() {
@@ -126,6 +138,7 @@ export default function LeerFactura({ alCerrar, alCargar }: { alCerrar: () => vo
   }
 
   const usadas = filas.filter((f) => f.destino !== "no");
+  const quitadas = filas.filter((f) => f.destino === "no");
   const nuevas = usadas.filter((f) => f.destino === "nuevo");
   const incompletas = usadas.filter((f) => !(f.cantidad && f.cantidad > 0) || (f.destino === "nuevo" && (!f.nombre.trim() || !f.categoria || !f.iva)));
   const sumaLineas = filas.filter((f) => f.destino !== "no" || !f.leida.es_producto).reduce((t, f) => t + (f.cantidad ?? 0) * (f.coste ?? 0), 0);
@@ -141,11 +154,16 @@ export default function LeerFactura({ alCerrar, alCargar }: { alCerrar: () => vo
       for (const f of actuales.filter((x) => x.destino === "nuevo")) {
         const r = await post<{ id: number }>("/productos", {
           nombre: f.nombre.trim(), codigo_barras: f.leida.codigo_barras, categoria_id: f.categoria, iva_id: f.iva, proveedor_id: prov,
-          unidad_medida: f.leida.por_kg ? "kg" : "unidad", coste_compra: f.coste ?? 0, precio_venta: f.pvp ?? 0, controla_caducidad: f.caduca,
+          unidad_medida: f.porKg ? "kg" : "unidad", coste_compra: f.coste ?? 0, precio_venta: f.pvp ?? 0, controla_caducidad: f.caduca,
         });
         actuales = actuales.map((x) => (x.clave === f.clave ? { ...x, destino: r.id } : x));
         setFilas(actuales);
         try { localStorage.setItem(CLAVE, String(f.categoria)); } catch { /* sin almacenamiento */ }
+      }
+      // Precios de venta cambiados en productos que ya existían
+      for (const x of actuales) {
+        const p = typeof x.destino === "number" ? productos.datos?.find((q) => q.id === x.destino) : undefined;
+        if (p && x.pvp != null && x.pvp > 0 && x.pvp !== p.precio_venta) await patch(`/productos/${p.id}`, { precio_venta: x.pvp });
       }
       // Los productos que aún no tenían proveedor se quedan con este
       if (prov) {
@@ -213,84 +231,128 @@ export default function LeerFactura({ alCerrar, alCargar }: { alCerrar: () => vo
             </div>
           </div>
 
-          <ul className="space-y-2">
-            {filas.map((f) => {
-              const l = f.leida;
-              const actual = typeof f.destino === "number" ? productos.datos?.find((p) => p.id === f.destino) : undefined;
-              const insignia = f.destino === "no" ? <Insignia color="gris">no se añade</Insignia>
-                : f.destino === "nuevo" ? <Insignia color="azul">producto nuevo</Insignia>
-                : f.destino === l.producto_id && l.como === "nombre" ? <Insignia color="ambar">¿es este?</Insignia>
-                : <Insignia color="verde">{f.destino === l.producto_id && l.como === "aprendido" ? "reconocido" : "en el catálogo"}</Insignia>;
-              const unidad = l.por_kg ? "kg" : "uds.";
-              return (
-                <li key={f.clave} className={`rounded-2xl border border-borde p-3 ${f.destino === "no" ? "opacity-60" : "bg-superficie-2/50"}`}>
-                  <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-xs text-tenue">En la factura</p>
-                      <p className="font-medium">{l.descripcion}</p>
-                      <p className="text-xs text-tenue">
-                        {l.unidades_por_bulto > 1 ? `cajas de ${l.unidades_por_bulto} · ` : ""}IVA {l.iva ?? "?"} %{l.importe != null ? ` · importe ${euros(l.importe)}` : ""}{l.codigo_barras ? ` · ${l.codigo_barras}` : ""}
-                      </p>
+          {paginas.some((p) => p.vista) && (
+            <div>
+              <button type="button" className="flex items-center gap-1.5 text-sm font-medium text-marca-fuerte hover:underline" onClick={() => setVerFoto(!verFoto)}>
+                <ImageIcon className="size-4" /> {verFoto ? "Ocultar la factura" : "Ver la factura para comparar"}
+              </button>
+              {verFoto && (
+                <div className="mt-2 max-h-[50vh] space-y-2 overflow-auto rounded-xl border border-borde bg-superficie-2 p-2">
+                  {paginas.filter((p) => p.vista).map((p, i) => <img key={i} src={p.vista!} alt={`Página ${i + 1} de la factura`} className="w-full rounded-lg" />)}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div>
+            <h3 className="mb-2 flex items-baseline justify-between font-semibold">
+              Productos de la factura <span className="text-sm font-normal text-tenue">{usadas.length}</span>
+            </h3>
+            <ul className="space-y-2">
+              {usadas.map((f) => {
+                const l = f.leida;
+                const actual = typeof f.destino === "number" ? productos.datos?.find((p) => p.id === f.destino) : undefined;
+                const kg = f.destino === "nuevo" ? f.porKg : actual?.unidad_medida === "kg";
+                const pctIva = actual ? actual.iva : ivas.datos?.find((i) => i.id === f.iva)?.porcentaje;
+                const base = f.pvp && pctIva != null ? f.pvp / (1 + pctIva / 100) : null;
+                const margen = base && f.coste ? ((base - f.coste) / base) * 100 : null;
+                const insignia = f.destino === "nuevo" ? <Insignia color="azul">nuevo</Insignia>
+                  : f.destino === l.producto_id && l.como === "nombre" ? <Insignia color="ambar">¿es este?</Insignia>
+                  : <Insignia color="verde">{f.destino === l.producto_id && l.como === "aprendido" ? "reconocido" : "ya lo tienes"}</Insignia>;
+                return (
+                  <li key={f.clave} className="rounded-2xl border border-borde bg-superficie-2/50 p-3">
+                    <div className="mb-2 flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        {l.descripcion ? (
+                          <p className="text-xs text-tenue">En la factura: <span className="font-medium text-suave">{l.descripcion}</span>
+                            {l.unidades_por_bulto > 1 ? ` · cajas de ${l.unidades_por_bulto}` : ""}{l.importe != null ? ` · ${euros(l.importe)}` : ""}</p>
+                        ) : <p className="text-xs text-tenue">Añadido a mano</p>}
+                      </div>
+                      {insignia}
+                      <button type="button" className="-m-1 rounded-lg p-1 text-tenue hover:text-rose-500" aria-label="Quitar de la lista" onClick={() => editar(f.clave, { destino: "no" })}>
+                        <Trash2 className="size-4" />
+                      </button>
                     </div>
-                    {insignia}
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-[2fr_1fr_1fr]">
-                    <div>
-                      <label className="etiqueta" htmlFor={`lf-p-${f.clave}`}>En la tienda es…</label>
-                      <select id={`lf-p-${f.clave}`} className="campo" value={String(f.destino)}
-                        onChange={(e) => editar(f.clave, { destino: e.target.value === "nuevo" || e.target.value === "no" ? e.target.value : Number(e.target.value) })}>
-                        <option value="nuevo">➕ Un producto nuevo</option>
-                        <option value="no">— No añadir (portes, envases…)</option>
-                        <optgroup label="Del catálogo">{lista.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</optgroup>
-                      </select>
-                    </div>
-                    {f.destino !== "no" && <>
+
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <div className="col-span-2">
+                        <label className="etiqueta" htmlFor={`lf-p-${f.clave}`}>Producto</label>
+                        <select id={`lf-p-${f.clave}`} className="campo" value={String(f.destino)} onChange={(e) => cambiarDestino(f, e.target.value)}>
+                          <option value="nuevo">➕ Nuevo (darlo de alta)</option>
+                          <optgroup label="Ya en tu catálogo">{lista.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</optgroup>
+                        </select>
+                      </div>
+                      {f.destino === "nuevo" && <>
+                        <div className="col-span-2">
+                          <label className="etiqueta" htmlFor={`lf-n-${f.clave}`}>Nombre en la tienda</label>
+                          <input id={`lf-n-${f.clave}`} className="campo" maxLength={100} placeholder="p. ej. Galletas de chocolate" value={f.nombre} onChange={(e) => editar(f.clave, { nombre: e.target.value })} />
+                        </div>
+                        <div>
+                          <label className="etiqueta" htmlFor={`lf-cat-${f.clave}`}>Categoría</label>
+                          <select id={`lf-cat-${f.clave}`} className="campo" value={f.categoria || ""} onChange={(e) => editar(f.clave, { categoria: Number(e.target.value) })}>
+                            <option value="">Elige…</option>{categorias.datos?.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="etiqueta" htmlFor={`lf-iva-${f.clave}`}>IVA</label>
+                          <select id={`lf-iva-${f.clave}`} className="campo" value={f.iva || ""} onChange={(e) => editar(f.clave, { iva: Number(e.target.value) })}>
+                            <option value="">Elige…</option>{ivas.datos?.map((c) => <option key={c.id} value={c.id}>{c.porcentaje} %</option>)}
+                          </select>
+                        </div>
+                        <div className="col-span-2 flex items-end gap-4 pb-2">
+                          <label className="flex items-center gap-2 text-sm text-suave">
+                            <input type="checkbox" className="size-4 accent-emerald-600" checked={f.porKg} onChange={(e) => editar(f.clave, { porKg: e.target.checked })} /> Se vende por kg
+                          </label>
+                          <label className="flex items-center gap-2 text-sm text-suave">
+                            <input type="checkbox" className="size-4 accent-emerald-600" checked={f.caduca} onChange={(e) => editar(f.clave, { caduca: e.target.checked })} /> Caduca
+                          </label>
+                        </div>
+                      </>}
                       <div>
-                        <label className="etiqueta" htmlFor={`lf-c-${f.clave}`}>Cantidad ({actual ? (actual.unidad_medida === "kg" ? "kg" : "uds.") : unidad})</label>
-                        <CampoNumero id={`lf-c-${f.clave}`} decimales={(actual?.unidad_medida ?? (l.por_kg ? "kg" : "unidad")) === "kg" ? 3 : 0} valor={f.cantidad} alCambiar={(n) => editar(f.clave, { cantidad: n })} />
+                        <label className="etiqueta" htmlFor={`lf-c-${f.clave}`}>Cantidad ({kg ? "kg" : "uds."})</label>
+                        <CampoNumero id={`lf-c-${f.clave}`} decimales={kg ? 3 : 0} valor={f.cantidad} alCambiar={(n) => editar(f.clave, { cantidad: n })} />
                       </div>
                       <div>
-                        <label className="etiqueta" htmlFor={`lf-k-${f.clave}`}>Coste/ud. sin IVA</label>
+                        <label className="etiqueta" htmlFor={`lf-k-${f.clave}`}>Compra sin IVA</label>
                         <CampoNumero id={`lf-k-${f.clave}`} decimales={4} valor={f.coste} alCambiar={(n) => editar(f.clave, { coste: n })} />
-                      </div>
-                    </>}
-                  </div>
-                  {actual && f.coste != null && actual.coste_medio > 0 && Math.abs(f.coste - actual.coste_medio) / actual.coste_medio > 0.15 && (
-                    <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300">Hasta ahora te costaba {euros(actual.coste_medio)}: comprueba que es el mismo producto y la cantidad por caja.</p>
-                  )}
-                  {f.destino === "nuevo" && (
-                    <div className="mt-2 grid grid-cols-2 gap-2 border-t border-borde pt-2 sm:grid-cols-[2fr_1fr_1fr_1fr]">
-                      <div className="col-span-2 sm:col-span-1">
-                        <label className="etiqueta" htmlFor={`lf-n-${f.clave}`}>Nombre en la tienda</label>
-                        <input id={`lf-n-${f.clave}`} className="campo" maxLength={100} value={f.nombre} onChange={(e) => editar(f.clave, { nombre: e.target.value })} />
-                      </div>
-                      <div>
-                        <label className="etiqueta" htmlFor={`lf-cat-${f.clave}`}>Categoría</label>
-                        <select id={`lf-cat-${f.clave}`} className="campo" value={f.categoria || ""} onChange={(e) => editar(f.clave, { categoria: Number(e.target.value) })}>
-                          <option value="">Elige…</option>{categorias.datos?.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="etiqueta" htmlFor={`lf-iva-${f.clave}`}>IVA</label>
-                        <select id={`lf-iva-${f.clave}`} className="campo" value={f.iva || ""} onChange={(e) => editar(f.clave, { iva: Number(e.target.value) })}>
-                          <option value="">Elige…</option>{ivas.datos?.map((c) => <option key={c.id} value={c.id}>{c.porcentaje} %</option>)}
-                        </select>
                       </div>
                       <div>
                         <label className="etiqueta" htmlFor={`lf-pvp-${f.clave}`}>Venta con IVA</label>
                         <CampoNumero id={`lf-pvp-${f.clave}`} placeholder="Luego" valor={f.pvp} alCambiar={(n) => editar(f.clave, { pvp: n })} />
                       </div>
-                      <label className="col-span-2 flex items-center gap-2 text-sm text-suave sm:col-span-4">
-                        <input type="checkbox" className="size-4 accent-emerald-600" checked={f.caduca} onChange={(e) => editar(f.clave, { caduca: e.target.checked })} /> Caduca (la fecha se pone en la compra)
-                      </label>
+                      <div className="flex flex-col justify-end pb-2 text-xs text-tenue">
+                        <span>Subtotal <b className="text-suave">{euros((f.cantidad ?? 0) * (f.coste ?? 0))}</b></span>
+                        {margen != null && <span className={margen < 0 ? "font-medium text-rose-600 dark:text-rose-400" : ""}>Margen {Math.round(margen)} %</span>}
+                      </div>
                     </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
 
-          {!filas.length && <p className="text-center text-sm text-tenue">No se ha leído ninguna línea. Prueba con otra foto.</p>}
+                    {actual && f.coste != null && actual.coste_medio > 0 && Math.abs(f.coste - actual.coste_medio) / actual.coste_medio > 0.15 && (
+                      <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300">Hasta ahora te costaba {euros(actual.coste_medio)}: comprueba que es el mismo producto y la cantidad por caja.</p>
+                    )}
+                    {actual && f.pvp != null && f.pvp > 0 && f.pvp !== actual.precio_venta && (
+                      <p className="mt-1.5 text-xs text-sky-700 dark:text-sky-300">El precio de venta cambiará de {actual.precio_venta ? euros(actual.precio_venta) : "sin precio"} a {euros(f.pvp)}.</p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            <button type="button" className="boton-sec mt-2 w-full border-dashed" onClick={añadirFila}><Plus className="size-4" /> Añadir un producto que falta</button>
+          </div>
+
+          {quitadas.length > 0 && (
+            <div className="rounded-xl border border-borde p-3">
+              <p className="mb-1 text-xs font-medium text-tenue">No se añaden ({quitadas.length})</p>
+              <ul className="divide-y divide-borde text-sm">
+                {quitadas.map((f) => (
+                  <li key={f.clave} className="flex items-center justify-between gap-2 py-1.5">
+                    <span className="min-w-0 truncate text-suave">{f.leida.descripcion || f.nombre || "Línea vacía"}{f.leida.importe != null ? ` · ${euros(f.leida.importe)}` : ""}</span>
+                    <button type="button" className="shrink-0 text-xs font-medium text-marca-fuerte hover:underline"
+                      onClick={() => editar(f.clave, { destino: f.leida.producto_id ?? "nuevo" })}>Añadir</button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {descuadre ? (
             <p className="flex gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
@@ -299,8 +361,8 @@ export default function LeerFactura({ alCerrar, alCargar }: { alCerrar: () => vo
             </p>
           ) : leida.total_sin_iva ? <p className="text-xs text-tenue">Las líneas cuadran con el total de la factura ({euros(leida.total_sin_iva)} sin IVA).</p> : null}
 
-          <div className="sticky bottom-0 -mx-1 flex flex-col gap-2 bg-superficie px-1 pt-2 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-xs text-tenue">{usadas.length} líneas{nuevas.length ? ` · ${nuevas.length} productos nuevos` : ""}{incompletas.length ? ` · faltan datos en ${incompletas.length}` : ""}</p>
+          <div className="sticky -bottom-6 -mx-1 -mb-6 flex flex-col gap-2 border-t border-borde bg-superficie px-1 pb-6 pt-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-tenue">{usadas.length} productos{nuevas.length ? ` · ${nuevas.length} nuevos` : ""}{incompletas.length ? ` · faltan datos en ${incompletas.length}` : ""}</p>
             <button className="boton" disabled={!usadas.length || incompletas.length > 0 || guardando} onClick={pasarACompra}>
               {guardando ? <Loader2 className="size-4 animate-spin" /> : null} Pasar a la compra
             </button>

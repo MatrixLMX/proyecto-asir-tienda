@@ -167,7 +167,8 @@ export function Modal({ abierto, alCerrar, titulo, children, ancho = "max-w-md" 
     <div className="fixed inset-0 z-50 grid place-items-end bg-slate-950/50 backdrop-blur-sm sm:place-items-center sm:p-4" onClick={alCerrar}>
       <div
         role="dialog" aria-modal="true" aria-label={titulo}
-        className={`tarjeta animar-modal w-full ${ancho} rounded-b-none p-6 shadow-2xl sm:rounded-2xl`}
+        // Si no cabe en la pantalla (formularios largos en el móvil), se desplaza por dentro
+        className={`tarjeta animar-modal max-h-[92dvh] w-full ${ancho} overflow-y-auto overscroll-contain rounded-b-none p-6 shadow-2xl sm:max-h-[90dvh] sm:rounded-2xl`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-5 flex items-center justify-between">
