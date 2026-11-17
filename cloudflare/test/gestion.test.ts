@@ -575,7 +575,8 @@ describe("asistente", () => {
   it("todas las herramientas funcionan contra la base de datos real", async () => {
     await vender({ lineas: [{ producto_id: 1, cantidad: 1 }] });
     const llamadas = ["buscar_productos", "productos_con_stock_bajo", "productos_que_caducan", "ventas_de_hoy", "productos_sin_vender", "caja_por_forma_de_pago", "clientes_con_fiado", "ofertas_activas",
-      "resumen_mensual", "beneficio_por_categoria", "ranking_productos", "beneficio_de_producto", "ventas_por_dia", "mermas_recientes", "pedido_sugerido", "cambios_recientes"];
+      "resumen_mensual", "beneficio_por_categoria", "ranking_productos", "beneficio_de_producto", "ventas_por_dia", "mermas_recientes", "pedido_sugerido", "cambios_recientes",
+      "proponer_merma", "proponer_nota", "proponer_compra", "proponer_producto_nuevo", "proponer_cambio_precio"];
     let ultima: any;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_u, init) => {
       ultima = JSON.parse(String(init!.body));
@@ -587,7 +588,7 @@ describe("asistente", () => {
     expect((await admin("/asistente", "POST", { mensaje: "todo" })).status).toBe(200);
     expect(herramientasEnviadas(ultima).sort()).toEqual([...llamadas].sort());
     const resultados = ultima.contents.at(-1).parts.map((p: any) => p.functionResponse);
-    expect(resultados).toHaveLength(16);
+    expect(resultados).toHaveLength(21);
     for (const { name, response } of resultados) expect(response.resultado, name).not.toBe("Herramienta no disponible.");
   });
 
@@ -599,7 +600,7 @@ describe("asistente", () => {
       return respuestaGemini({ text: "Eso solo lo ve el administrador." });
     });
     expect((await dependiente("/asistente", "POST", { mensaje: "¿Cuánto gano?" })).status).toBe(200);
-    expect(herramientasEnviadas(ultima).sort()).toEqual(["buscar_productos", "caja_por_forma_de_pago", "clientes_con_fiado", "ofertas_activas", "productos_con_stock_bajo", "productos_que_caducan", "productos_sin_vender", "ventas_de_hoy"]);
+    expect(herramientasEnviadas(ultima).sort()).toEqual(["buscar_productos", "caja_por_forma_de_pago", "clientes_con_fiado", "ofertas_activas", "productos_con_stock_bajo", "productos_que_caducan", "productos_sin_vender", "proponer_merma", "proponer_nota", "ventas_de_hoy"]);
     expect(ultima.contents.at(-1).parts[0].functionResponse.response.resultado).toBe("Herramienta no disponible.");
     expect(ultima.systemInstruction.parts[0].text).toContain("DEPENDIENTE");
   });
@@ -626,6 +627,115 @@ describe("asistente", () => {
 
   it("/auth/yo dice si hay asistente", async () => {
     expect((await json(admin("/auth/yo"))).asistente).toBe(true);
+  });
+});
+
+describe("asistente: acciones y voz", () => {
+  const respuestaGemini = (...parts: unknown[]) => Response.json({ candidates: [{ content: { parts } }] });
+  /** Simula a Gemini: la primera vuelta pide las herramientas, la segunda responde. */
+  const simular = (llamadas: { name: string; args: unknown }[], texto = "Te lo dejo preparado.") => {
+    const peticiones: any[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_u, init) => {
+      const cuerpo = JSON.parse(String(init!.body));
+      peticiones.push(cuerpo);
+      if (cuerpo.contents[0].parts[0].inlineData) return respuestaGemini({ text: "Añade 24 aguas" });
+      const ultima = cuerpo.contents.at(-1).parts[0];
+      return ultima.functionResponse ? respuestaGemini({ text: texto }) : respuestaGemini(...llamadas.map((l) => ({ functionCall: l })));
+    });
+    return peticiones;
+  };
+  const resultados = (p: any[]) => p.at(-1).contents.at(-1).parts.map((x: any) => x.functionResponse.response.resultado as string);
+
+  it("prepara los cambios sin tocar nada en la base de datos", async () => {
+    const antes = { stock: await stock(1), compras: await contar("compras"), productos: await contar("productos"), notas: await contar("notas"), mermas: await contar("mermas") };
+    const p = simular([
+      { name: "proponer_compra", args: { lineas: [{ producto_id: 1, cantidad: 24, coste_unitario: 0.3 }, { producto_id: 2, cantidad: 5 }], proveedor: "coca cola" } },
+      { name: "proponer_producto_nuevo", args: { nombre: "Galletas de chocolate", precio_venta: 1.8, coste_compra: 0.95, iva: 10, categoria: "alimentacion", stock_inicial: 12 } },
+      { name: "proponer_cambio_precio", args: { producto_id: 3, precio_venta: 2.75 } },
+      { name: "proponer_merma", args: { producto_id: 3, cantidad: 2, motivo: "roto" } },
+      { name: "proponer_nota", args: { texto: "Llamar al de la fruta" } },
+    ]);
+    const r = await json(admin("/asistente", "POST", { mensaje: "varias cosas" }));
+    expect(r.respuesta).toBe("Te lo dejo preparado.");
+    expect(r.acciones).toEqual([
+      { tipo: "compra", proveedor_id: expect.any(Number), proveedor: "Coca-Cola", lineas: [
+        { producto_id: 1, nombre: "Agua", unidad_medida: "unidad", cantidad: 24, coste_unitario: 0.3, necesita_fecha: false },
+        // Sin precio: el coste medio
+        { producto_id: 2, nombre: "Patatas", unidad_medida: "kg", cantidad: 5, coste_unitario: 1.5, necesita_fecha: false },
+      ] },
+      { tipo: "producto", nombre: "Galletas de chocolate", categoria_id: expect.any(Number), iva_id: expect.any(Number), unidad_medida: "unidad",
+        precio_venta: 1.8, coste_compra: 0.95, stock_inicial: 12, codigo_barras: null },
+      { tipo: "precio", producto_id: 3, nombre: "Yogur", antes: 2.5, precio_venta: 2.75 },
+      { tipo: "merma", producto_id: 3, nombre: "Yogur", unidad_medida: "unidad", cantidad: 2, motivo: "roto" },
+      { tipo: "nota", texto: "Llamar al de la fruta" },
+    ]);
+    // Al modelo se le dice que está pendiente, para que no diga que ya está hecho
+    for (const t of resultados(p)) expect(t).toContain("PENDIENTE DE CONFIRMAR");
+    expect(p[0].systemInstruction.parts[0].text).toContain("Nunca digas que algo ya está hecho");
+    expect({ stock: await stock(1), compras: await contar("compras"), productos: await contar("productos"), notas: await contar("notas"), mermas: await contar("mermas") }).toEqual(antes);
+
+    // Lo que se ha preparado se puede enviar tal cual a las rutas normales
+    const compra = r.acciones[0];
+    expect((await admin("/compras", "POST", { proveedor_id: compra.proveedor_id, lineas: compra.lineas })).status).toBe(200);
+    expect(await stock(1)).toBe(antes.stock + 24000);
+    expect((await admin("/productos", "POST", r.acciones[1])).status).toBe(200);
+  });
+
+  it("no prepara nada con productos que no existen, repetidos o datos que faltan", async () => {
+    const p = simular([
+      { name: "proponer_compra", args: { lineas: [{ producto_id: 999, cantidad: 3 }] } },
+      { name: "proponer_compra", args: { lineas: [{ producto_id: 4, cantidad: 3 }] } }, // dado de baja
+      { name: "proponer_producto_nuevo", args: { nombre: "agua" } },
+      { name: "proponer_cambio_precio", args: { producto_id: 1 } },
+      { name: "proponer_merma", args: { producto_id: 1, cantidad: 0, motivo: "roto" } },
+    ]);
+    const r = await json(admin("/asistente", "POST", { mensaje: "x" }));
+    expect(r.acciones).toBeUndefined();
+    const t = resultados(p);
+    expect(t[0]).toContain("No hay ningún producto activo con id 999");
+    expect(t[1]).toContain("No hay ningún producto activo con id 4");
+    expect(t[2]).toContain('Ya existe un producto llamado "Agua"');
+    expect(t[3]).toContain("Falta el precio");
+    expect(t[4]).toContain("Falta la cantidad");
+  });
+
+  it("el dependiente solo puede preparar mermas y notas", async () => {
+    const p = simular([
+      { name: "proponer_compra", args: { lineas: [{ producto_id: 1, cantidad: 3 }] } },
+      { name: "proponer_cambio_precio", args: { producto_id: 1, precio_venta: 9 } },
+      { name: "proponer_nota", args: { texto: "Falta cambio" } },
+    ]);
+    const r = await json(dependiente("/asistente", "POST", { mensaje: "x" }));
+    expect(r.acciones).toEqual([{ tipo: "nota", texto: "Falta cambio" }]);
+    expect(resultados(p).slice(0, 2)).toEqual(["Herramienta no disponible.", "Herramienta no disponible."]);
+  });
+
+  it("busca productos por nombres aproximados y devuelve su id", async () => {
+    const p = simular([{ name: "buscar_productos", args: { texto: "yogures" } }]);
+    await admin("/asistente", "POST", { mensaje: "x" });
+    const filas = JSON.parse(resultados(p)[0]!);
+    expect(filas[0]).toMatchObject({ id: 3, producto: "Yogur" });
+  });
+
+  it("entiende mensajes de voz: transcribe y responde a lo transcrito", async () => {
+    const p = simular([{ name: "proponer_compra", args: { lineas: [{ producto_id: 1, cantidad: 24 }] } }]);
+    const r = await json(admin("/asistente", "POST", { audio: { tipo: "audio/webm;codecs=opus", datos: "AAAA" }, conversacion: "voz" }));
+    expect(r.transcripcion).toBe("Añade 24 aguas");
+    expect(r.acciones).toHaveLength(1);
+    // Primero la transcripción, con el audio y los nombres de los productos
+    expect(p[0].contents[0].parts[0].inlineData).toEqual({ mimeType: "audio/webm", data: "AAAA" });
+    expect(p[0].systemInstruction.parts[0].text).toContain("Patatas");
+    // Luego la conversación normal, sin el audio
+    expect(p[1].contents[0].parts[0].text).toBe("(mensaje de voz) Añade 24 aguas");
+    expect(JSON.stringify(p[1])).not.toContain("inlineData");
+
+    expect((await admin("/asistente", "POST", { audio: { tipo: "video/mp4", datos: "AAAA" } })).status).toBe(400);
+    expect((await admin("/asistente", "POST", { audio: { tipo: "audio/webm", datos: "A".repeat(3_000_001) } })).status).toBe(400);
+    vi.restoreAllMocks();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => respuestaGemini({ text: "(no se entiende)" }));
+    const mal = await admin("/asistente", "POST", { audio: { tipo: "audio/mp4", datos: "AAAA" } });
+    expect(mal.status).toBe(400);
+    expect((await mal.json<any>()).detail).toContain("No he entendido");
   });
 });
 

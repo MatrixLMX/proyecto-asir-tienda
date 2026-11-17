@@ -7,7 +7,7 @@
  *  aprende cómo llama cada proveedor a cada producto. */
 import { Hono } from "hono";
 import { ErrorProveedor, MODELO, llamar } from "./asistente";
-import { type C, type Ctx, type Datos, cuerpo, fallo, filas, normalizar, soloAdmin } from "./comun";
+import { type C, type Ctx, type Datos, cuerpo, fallo, filas, normalizar, palabras, parecido, soloAdmin } from "./comun";
 
 export const facturas = new Hono<Ctx>();
 
@@ -18,22 +18,6 @@ const MAX_BASE64 = 14_000_000; // unos 10 MB de fichero
 
 /** Clave con la que se guarda y se busca una descripción de factura. */
 export const claveAlias = (s: unknown) => normalizar(s).replace(/[^a-z0-9%,.]+/g, " ").trim().replace(/\s+/g, " ").slice(0, 120);
-
-// Palabras que no ayudan a reconocer un producto ni un proveedor
-const VACIAS = new Set(["de", "del", "la", "el", "los", "las", "y", "con", "sin", "en", "para", "x", "u", "ud", "uds", "unid", "unidades",
-  "sl", "slu", "sa", "sau", "s", "l", "cb", "sc", "coop", "sociedad", "limitada", "anonima", "distribuciones", "distribucion", "comercial", "grupo", "iberia", "espana"]);
-const palabras = (s: string) => normalizar(s).replace(/[^a-z0-9]+/g, " ").split(" ").filter((p) => p.length > 1 && !VACIAS.has(p));
-
-/** Parecido entre la descripción de la factura y el nombre de un producto (0 a 1). */
-function parecido(factura: string, producto: string) {
-  const f = palabras(factura), p = palabras(producto);
-  if (!p.length || !f.length) return 0;
-  // Las facturas abrevian: "CC" o "COCA" cuentan como "coca"
-  const coincide = (a: string) => f.some((b) => b === a || (a.length >= 4 && b.length >= 3 && (a.startsWith(b) || b.startsWith(a))));
-  const comunes = p.filter(coincide);
-  if (!comunes.some((x) => x.length >= 3 && !/^\d+$/.test(x))) return 0;
-  return comunes.length / p.length;
-}
 
 const ESQUEMA = {
   type: "OBJECT",

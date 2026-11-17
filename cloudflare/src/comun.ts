@@ -180,3 +180,19 @@ export function enteroUrl(c: C, nombre: string, defecto: number, min: number, ma
   if (!Number.isInteger(n)) throw fallo(400, `Revisa ${nombre}`);
   return Math.min(Math.max(n, min), max);
 }
+
+// Palabras que no ayudan a reconocer un producto ni un proveedor
+const VACIAS = new Set(["de", "del", "la", "el", "los", "las", "y", "con", "sin", "en", "para", "x", "u", "ud", "uds", "unid", "unidades",
+  "sl", "slu", "sa", "sau", "s", "l", "cb", "sc", "coop", "sociedad", "limitada", "anonima", "distribuciones", "distribucion", "comercial", "grupo", "iberia", "espana"]);
+export const palabras = (s: string) => normalizar(s).replace(/[^a-z0-9]+/g, " ").split(" ").filter((p) => p.length > 1 && !VACIAS.has(p));
+
+/** Parecido entre un texto (línea de factura, lo que se ha dicho...) y el nombre de un producto (0 a 1). */
+export function parecido(factura: string, producto: string) {
+  const f = palabras(factura), p = palabras(producto);
+  if (!p.length || !f.length) return 0;
+  // Las facturas abrevian: "CC" o "COCA" cuentan como "coca"
+  const coincide = (a: string) => f.some((b) => b === a || (a.length >= 4 && b.length >= 3 && (a.startsWith(b) || b.startsWith(a))));
+  const comunes = p.filter(coincide);
+  if (!comunes.some((x) => x.length >= 3 && !/^\d+$/.test(x))) return 0;
+  return comunes.length / p.length;
+}
