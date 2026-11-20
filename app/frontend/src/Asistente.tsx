@@ -19,7 +19,7 @@ const SUGERENCIAS: Record<Rol, string[]> = {
   ],
   dependiente: [
     "¿Qué caduca esta semana?",
-    "¿Qué productos están agotados?",
+    "¿Qué está bajo mínimos?",
     "Se han roto 2 yogures",
   ],
 };

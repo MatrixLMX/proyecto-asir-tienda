@@ -2,7 +2,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { ArrowDown, ArrowUp, ClipboardCheck, PackageMinus, PackageSearch, Search } from "lucide-react";
 import { cantidad, euros, post, type ProductoStock } from "../api";
 import type { PropsPagina } from "../App";
-import { Cabecera, Esqueleto, Insignia, Modal, Pestañas, Vacio, emitirCambio, useAviso, useDatos } from "../ui";
+import { Cabecera, Esqueleto, FotoProducto, Insignia, Modal, Pestañas, Vacio, emitirCambio, useAviso, useDatos } from "../ui";
 
 const MOTIVOS = [
   { id: "roto", nombre: "Roto o estropeado" },
@@ -12,7 +12,7 @@ const MOTIVOS = [
   { id: "otro", nombre: "Otro motivo" },
 ] as const;
 
-type Filtro = "todos" | "BAJO" | "AGOTADO";
+type Filtro = "todos" | "BAJO";
 type Orden = "producto" | "categoria" | "precio_venta" | "stock_actual";
 
 export default function Stock({ usuario, ir }: PropsPagina) {
@@ -63,7 +63,6 @@ export default function Stock({ usuario, ir }: PropsPagina) {
           opciones={[
             { id: "todos", nombre: "Todos", cuenta: cuenta("todos") },
             { id: "BAJO", nombre: "Bajo", cuenta: cuenta("BAJO") },
-            { id: "AGOTADO", nombre: "Agotado", cuenta: cuenta("AGOTADO") },
           ]}
         />
       </div>
@@ -89,7 +88,7 @@ export default function Stock({ usuario, ir }: PropsPagina) {
                 const color = p.estado === "OK" ? "verde" : p.estado === "BAJO" ? "ambar" : "rojo";
                 return (
                   <tr key={p.id}>
-                    <td className="font-medium">{p.producto}<span className="block text-xs font-normal text-tenue sm:hidden">{p.categoria}</span></td>
+                    <td className="font-medium"><span className="flex items-center gap-2"><FotoProducto url={p.imagen_url} className="size-8" /><span>{p.producto}<span className="block text-xs font-normal text-tenue sm:hidden">{p.categoria}</span></span></span></td>
                     <td className="hidden text-suave sm:table-cell">{p.categoria}</td>
                     <td className="text-right tabular-nums">{euros(p.precio_venta)}</td>
                     <td className="text-right font-semibold tabular-nums">{p.control_stock ? cantidad(p.stock_actual, p.unidad_medida) : <span className="font-normal text-tenue">—</span>}</td>
@@ -107,7 +106,7 @@ export default function Stock({ usuario, ir }: PropsPagina) {
                     <td className="w-10 text-right">
                       <button
                         className="rounded-lg p-1.5 text-tenue hover:bg-superficie-2 hover:text-rose-500 disabled:opacity-30"
-                        disabled={!p.control_stock || p.stock_actual <= 0} onClick={() => setMerma(p)}
+                        disabled={!p.control_stock} onClick={() => setMerma(p)}
                         title="Registrar merma (roto, caducado…)" aria-label={`Registrar merma de ${p.producto}`}
                       >
                         <PackageMinus className="size-4" />
@@ -135,7 +134,7 @@ function RegistrarMerma({ producto: p, alCerrar }: { producto: ProductoStock | n
   const [motivo, setMotivo] = useState<(typeof MOTIVOS)[number]["id"]>("roto");
   const [notas, setNotas] = useState("");
   const valor = Number(n.replace(",", ".")) || 0;
-  const valido = p && valor > 0 && valor <= p.stock_actual && (p.unidad_medida === "kg" || Number.isInteger(valor));
+  const valido = p && valor > 0 && (p.unidad_medida === "kg" || Number.isInteger(valor));
 
   async function guardar(e: FormEvent) {
     e.preventDefault();

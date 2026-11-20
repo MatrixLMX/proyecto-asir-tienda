@@ -325,3 +325,16 @@ export function CampoNumero({ valor, alCambiar, decimales = 2, className = "camp
     />
   );
 }
+
+/* =====================================================================
+   Foto del producto (de Open Food Facts). Sin foto, o si no carga, nada:
+   quien la usa decide si deja el hueco.
+   ===================================================================== */
+export function FotoProducto({ url, className = "size-12" }: { url: string | null | undefined; className?: string }) {
+  const [mal, setMal] = useState(false);
+  if (!url || mal) return null;
+  return (
+    <img src={url} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setMal(true)}
+      className={`shrink-0 rounded-lg bg-white object-contain p-0.5 ${className}`} />
+  );
+}

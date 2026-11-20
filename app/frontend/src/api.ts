@@ -16,10 +16,11 @@ export interface ProductoStock {
   precio_venta: number;
   stock_actual: number;
   stock_minimo: number;
-  estado: "OK" | "BAJO" | "AGOTADO";
+  estado: "OK" | "BAJO";
   control_stock: number;
   precio_libre: number;
   acceso_rapido: number;
+  imagen_url: string | null;
 }
 
 export interface Oferta {

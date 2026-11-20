@@ -1,8 +1,8 @@
 import { Suspense, lazy, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { Download, FileSpreadsheet, FolderPlus, PackagePlus, Pencil, Phone, Plus, ScanBarcode, Search, Tag, Truck, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Download, FileSpreadsheet, FolderPlus, ImageOff, PackagePlus, Pencil, Phone, Plus, ScanBarcode, Search, Tag, Truck, X } from "lucide-react";
 import { api, cantidad, descargarCsv, diaISO, euros, fecha, patch, post } from "../api";
 import { BotonEscanear } from "../escaner";
-import { Cabecera, CampoNumero, Esqueleto, Insignia, Modal, Pestañas, emitirCambio, useAviso, useDatos } from "../ui";
+import { Cabecera, CampoNumero, Esqueleto, FotoProducto, Insignia, Modal, Pestañas, emitirCambio, useAviso, useDatos } from "../ui";
 import type { ProductoAdmin } from "./Compras";
 
 // Solo se descarga si se usa: lleva el lector de Excel
@@ -42,6 +42,8 @@ const margenDe = (precio: number, coste: number) => (precio ? ((precio - coste) 
 const pct = (n: number) => `${n.toLocaleString("es-ES", { maximumFractionDigits: 1 })} %`;
 const redondear = (n: number, d = 4) => Math.round(n * 10 ** d) / 10 ** d;
 const MARGEN_OBJETIVO = 30;
+type Mostrar = "todos" | "sin_venta" | "sin_compra" | "sin_foto";
+type CampoOrden = "nombre" | "categoria" | "precio_venta" | "coste_medio" | "margen" | "stock_actual";
 
 export default function Catalogo() {
   const [vista, setVista] = useState<"productos" | "categorias" | "proveedores">("productos");
@@ -132,8 +134,51 @@ function Productos() {
   const numSinCoste = activos.filter(sinCoste).length;
   useEffect(() => { if (!numSinPrecio) setSoloSinPrecio(false); }, [numSinPrecio]);
 
-  const filas = useMemo(() => (productos.datos ?? []).filter((p) => (bajas || p.activo) && (!soloSinPrecio || faltaAlgo(p)) &&
-    `${p.nombre} ${p.categoria} ${p.proveedor ?? ""} ${p.codigo_barras ?? ""}`.toLowerCase().includes(q.toLowerCase())), [productos.datos, q, bajas, soloSinPrecio]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [mostrar, setMostrar] = useState<Mostrar>("todos");
+  const [orden, setOrden] = useState<{ campo: CampoOrden; asc: boolean }>({ campo: "nombre", asc: true });
+  const ordenarPor = (campo: CampoOrden) => setOrden((o) => ({ campo, asc: o.campo === campo ? !o.asc : campo === "nombre" || campo === "categoria" }));
+  const sinFoto = (p: ProductoAdmin) => !p.imagen_url;
+  const cumple: Record<Mostrar, (p: ProductoAdmin) => boolean> = {
+    todos: () => true, sin_venta: sinPrecio, sin_compra: sinCoste, sin_foto: sinFoto,
+  };
+  const filas = useMemo(() => {
+    const lista = (productos.datos ?? []).filter((p) => (bajas || p.activo) && (!soloSinPrecio || faltaAlgo(p)) && cumple[mostrar](p) &&
+      `${p.nombre} ${p.categoria} ${p.proveedor ?? ""} ${p.codigo_barras ?? ""}`.toLowerCase().includes(q.toLowerCase()));
+    const valor = (p: ProductoAdmin): number | string => orden.campo === "margen"
+      ? (p.coste_medio && p.precio_venta ? margenDe(p.precio_venta, p.coste_medio) : -Infinity)
+      : orden.campo === "nombre" || orden.campo === "categoria" ? p[orden.campo] : p[orden.campo] ?? 0;
+    return [...lista].sort((a, b) => {
+      const x = valor(a), y = valor(b);
+      const c = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "es");
+      return (orden.asc ? c : -c) || a.nombre.localeCompare(b.nombre, "es");
+    });
+  }, [productos.datos, q, bajas, soloSinPrecio, mostrar, orden]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fotos: las que aún no se han buscado se buscan solas, de 20 en 20
+  const pendientesFoto = activos.some((p) => p.imagen_url === null && /^\d{8,14}$/.test(p.codigo_barras ?? ""));
+  useEffect(() => {
+    if (!pendientesFoto) return;
+    let seguir = true;
+    (async () => {
+      for (let vuelta = 0; vuelta < 15 && seguir; vuelta++) {
+        try {
+          const r = await post<{ buscadas: number; pendientes: number }>("/productos/fotos", {});
+          if (!r.buscadas || !r.pendientes) break;
+        } catch { break; }
+      }
+      if (seguir) productos.recargar();
+    })();
+    return () => { seguir = false; };
+  }, [pendientesFoto]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const Titulo = ({ campo, children, clase = "" }: { campo: CampoOrden; children: string; clase?: string }) => (
+    <th className={clase}>
+      <button type="button" onClick={() => ordenarPor(campo)}
+        className={`inline-flex items-center gap-1 uppercase hover:text-texto ${orden.campo === campo ? "text-texto" : ""}`}>
+        {children}{orden.campo === campo && (orden.asc ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />)}
+      </button>
+    </th>
+  );
 
   const nuevo = (codigo = "") => { setInfo(null); setForm({ id: null, datos: { ...productoVacio, codigo_barras: codigo } }); if (codigo) buscarCodigo(codigo, true); };
 
@@ -197,6 +242,17 @@ function Productos() {
   }
 
   const porKg = form?.datos.unidad_medida === "kg" ? "/kg" : "";
+
+  /** "" quita la foto; null la vuelve a buscar. */
+  async function cambiarFoto(valor: "" | null) {
+    if (!form?.id) return;
+    await ejecutar(async () => {
+      await patch(`/productos/${form.id}`, { imagen_url: valor });
+      if (valor === null) await post("/productos/fotos", {});
+      const nuevo = await api<ProductoAdmin[]>("/productos/admin").then((l) => l.find((x) => x.id === form.id));
+      if (nuevo) setForm((f) => (f ? { ...f, actual: nuevo } : f));
+    }, valor === "" ? "Foto quitada" : "Foto buscada");
+  }
   const hoyMas = (dias: number) => fecha(diaISO(dias));
 
   return (
@@ -205,6 +261,28 @@ function Productos() {
         <div className="relative min-w-60 flex-1 sm:max-w-md">
           <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-tenue" />
           <input className="campo pl-10" placeholder="Buscar por producto, categoría, proveedor o código…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
+          <select className="campo sm:w-auto" aria-label="Mostrar" value={mostrar} onChange={(e) => setMostrar(e.target.value as Mostrar)}>
+            <option value="todos">Ver todos</option>
+            <option value="sin_venta">Sin PVP ({numSinVenta})</option>
+            <option value="sin_compra">Sin coste ({numSinCoste})</option>
+            <option value="sin_foto">Sin foto ({activos.filter(sinFoto).length})</option>
+          </select>
+          <select className="campo sm:w-auto" aria-label="Ordenar por" value={`${orden.campo}:${orden.asc ? "asc" : "desc"}`}
+            onChange={(e) => { const [campo, sentido] = e.target.value.split(":"); setOrden({ campo: campo as CampoOrden, asc: sentido === "asc" }); }}>
+            <option value="nombre:asc">A-Z</option>
+            <option value="nombre:desc">Z-A</option>
+            <option value="categoria:asc">Categoría</option>
+            <option value="precio_venta:desc">PVP más alto</option>
+            <option value="precio_venta:asc">PVP más bajo</option>
+            <option value="coste_medio:desc">Coste más alto</option>
+            <option value="coste_medio:asc">Coste más bajo</option>
+            <option value="margen:desc">Más margen</option>
+            <option value="margen:asc">Menos margen</option>
+            <option value="stock_actual:desc">Más stock</option>
+            <option value="stock_actual:asc">Menos stock</option>
+          </select>
         </div>
         <label className="flex cursor-pointer items-center gap-2 text-sm text-suave">
           <input type="checkbox" className="size-4 accent-emerald-600" checked={bajas} onChange={(e) => setBajas(e.target.checked)} /> Ver dados de baja
@@ -241,12 +319,12 @@ function Productos() {
           <table className="tabla w-full text-sm">
             <thead>
               <tr>
-                <th>Producto</th>
+                <Titulo campo="nombre">Producto</Titulo>
                 <th className="hidden md:table-cell">Proveedor</th>
-                <th className="text-right">Coste</th>
-                <th className="text-right">PVP</th>
-                <th className="text-right">Margen</th>
-                <th className="hidden text-right sm:table-cell">Stock</th>
+                <Titulo campo="coste_medio" clase="text-right">Coste</Titulo>
+                <Titulo campo="precio_venta" clase="text-right">PVP</Titulo>
+                <Titulo campo="margen" clase="text-right">Margen</Titulo>
+                <Titulo campo="stock_actual" clase="hidden text-right sm:table-cell">Stock</Titulo>
                 <th className="hidden sm:table-cell" />
               </tr>
             </thead>
@@ -256,8 +334,13 @@ function Productos() {
                 return (
                   <tr key={p.id} className={`cursor-pointer hover:bg-superficie-2/60 ${p.activo ? "" : "opacity-50"}`} onClick={() => editar(p)}>
                     <td>
+                      <div className="flex items-center gap-2.5">
+                      <FotoProducto url={p.imagen_url} className="size-10" />
+                      <div className="min-w-0">
                       <p className="font-medium">{p.nombre} {!p.activo && <Insignia color="gris">de baja</Insignia>}</p>
                       <p className="text-xs text-tenue">{p.categoria}{p.controla_caducidad ? " · caduca" : ""}{p.codigo_barras ? ` · ${p.codigo_barras}` : ""}</p>
+                      </div>
+                      </div>
                     </td>
                     <td className="hidden text-suave md:table-cell">{p.proveedor ?? "—"}</td>
                     <td className="text-right tabular-nums text-suave">{p.coste_medio ? euros(p.coste_medio) : <span className={p.precio_libre ? "text-tenue" : "text-amber-600 dark:text-amber-400"}>{p.precio_libre ? "—" : "falta"}</span>}</td>
@@ -288,6 +371,21 @@ function Productos() {
           const sugerido = d.coste ? Math.ceil(d.coste / (1 - MARGEN_OBJETIVO / 100) * 20) / 20 : null;
           return (
           <form onSubmit={guardar} className="grid max-h-[72vh] gap-4 overflow-y-auto px-0.5 sm:grid-cols-2">
+            {form.actual && (form.actual.imagen_url || form.actual.codigo_barras) && (
+              <div className="flex items-center gap-3 sm:col-span-2">
+                {form.actual.imagen_url
+                  ? <FotoProducto url={form.actual.imagen_url} className="size-24" />
+                  : <div className="grid size-24 shrink-0 place-items-center rounded-lg bg-superficie-2 text-tenue"><ImageOff className="size-6" /></div>}
+                <div className="text-xs text-tenue">
+                  {form.actual.imagen_url ? "Foto de Open Food Facts, buscada con el código de barras."
+                    : form.actual.imagen_url === "" ? "No se ha encontrado foto para este código." : "Buscando la foto…"}
+                  <div className="mt-1.5 flex gap-3">
+                    {form.actual.imagen_url && <button type="button" className="font-medium text-rose-600 hover:underline dark:text-rose-400" onClick={() => cambiarFoto("")}>Quitar foto</button>}
+                    {form.actual.imagen_url === "" && form.actual.codigo_barras && <button type="button" className="font-medium text-marca-fuerte hover:underline" onClick={() => cambiarFoto(null)}>Volver a buscar</button>}
+                  </div>
+                </div>
+              </div>
+            )}
             <Seccion>Producto</Seccion>
             <div className="sm:col-span-2">
               <label className="etiqueta" htmlFor="p-codigo">Código de barras</label>

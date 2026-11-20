@@ -62,7 +62,7 @@ describe("productos", () => {
     expect(lista.map((p) => p.producto)).toEqual(["Agua", "Escaso", "Patatas", "Yogur"]);
     expect(lista[0]).toEqual({
       id: 1, codigo_barras: "111", producto: "Agua", categoria: "Bebidas", unidad_medida: "unidad",
-      precio_venta: 1.2, stock_actual: 20, stock_minimo: 5, estado: "OK", control_stock: 1, precio_libre: 0, acceso_rapido: 0,
+      precio_venta: 1.2, stock_actual: 20, stock_minimo: 5, estado: "OK", control_stock: 1, precio_libre: 0, acceso_rapido: 0, imagen_url: null,
     });
   });
 
@@ -121,19 +121,25 @@ describe("venta", () => {
     expect(await db.prepare("SELECT SUM(restante_milli) AS s FROM lotes").first<number>("s")).toBe(0);
   });
 
-  it("sin stock no guarda nada, ni las líneas que sí cabían", async () => {
+  it("sin stock apuntado también vende: el stock se queda en 0 y se apunta lo vendido de más", async () => {
     const r = await vender({ lineas: [{ producto_id: 1, cantidad: 2 }, { producto_id: 5, cantidad: 6 }] });
-    expect(r.status).toBe(400);
-    expect(((await r.json()) as { detail: string }).detail).toBe('Stock insuficiente de "Escaso": quedan 5');
+    expect(r.status).toBe(200);
+    const { id } = (await r.json()) as { id: number };
+    expect(await stock(1)).toBe(18000);
+    expect(await stock(5)).toBe(0);
+    expect((await db.prepare("SELECT cantidad_milli FROM ventas_sin_stock").all()).results).toEqual([{ cantidad_milli: 1000 }]);
+    // Al anular la venta vuelve solo lo que había: no se inventa stock
+    await db.prepare("DELETE FROM lineas_venta WHERE venta_id = ?").bind(id).run();
+    expect(await stock(5)).toBe(5000);
     expect(await stock(1)).toBe(20000);
-    expect(await contar("ventas")).toBe(0);
-    expect(await contar("lineas_venta")).toBe(0);
+    expect(await contar("ventas_sin_stock")).toBe(0);
   });
 
-  it("varias líneas que juntas superan el stock tampoco pasan", async () => {
-    const r = await vender({ lineas: [{ producto_id: 5, cantidad: 3 }, { producto_id: 5, cantidad: 3 }] });
-    expect(r.status).toBe(400);
-    expect(await stock(5)).toBe(5000);
+  it("varias líneas que juntas superan el stock también pasan, y los lotes no bajan de 0", async () => {
+    const r = await vender({ lineas: [{ producto_id: 3, cantidad: 10 }, { producto_id: 3, cantidad: 10 }] });
+    expect(r.status).toBe(200);
+    expect(await stock(3)).toBe(0);
+    expect(await db.prepare("SELECT MIN(restante_milli) AS m FROM lotes").first<number>("m")).toBe(0);
   });
 
   it("rechaza fracciones en productos por unidad, bajas y datos malos, sin guardar", async () => {
@@ -178,10 +184,10 @@ describe("venta", () => {
 
   it("ventas simultáneas nunca dejan el stock en negativo", async () => {
     const rs = await Promise.all(Array.from({ length: 12 }, () => vender({ lineas: [{ producto_id: 5, cantidad: 1 }] })));
-    expect(rs.filter((r) => r.status === 200)).toHaveLength(5);
-    expect(rs.filter((r) => r.status === 400)).toHaveLength(7);
+    expect(rs.filter((r) => r.status === 200)).toHaveLength(12);
     expect(await stock(5)).toBe(0);
-    expect(await contar("ventas")).toBe(5);
+    expect(await contar("ventas")).toBe(12);
+    expect(await db.prepare("SELECT SUM(cantidad_milli) AS s FROM ventas_sin_stock").first<number>("s")).toBe(7000);
   });
 
   it("los triggers protegen aunque se salte la API", async () => {
@@ -189,7 +195,6 @@ describe("venta", () => {
     const directo = (producto: number, milli: number) => db.prepare(
       "INSERT INTO lineas_venta (venta_id, producto_id, cantidad_milli, precio_unitario_cent, iva_cp, coste_unitario_dm) VALUES (500, ?, ?, 1, 0, 0)",
     ).bind(producto, milli).run();
-    await expect(directo(5, 6000)).rejects.toThrow(/STOCK_INSUFICIENTE/);
     await expect(directo(4, 1000)).rejects.toThrow(/PRODUCTO_BAJA/);
     await expect(directo(1, 1500)).rejects.toThrow(/SOLO_UNIDADES/);
   });

@@ -43,7 +43,7 @@ const COMUNES: Record<string, Herramienta> = {
         SELECT id, producto, categoria, unidad_medida, precio_venta, stock_actual, stock_minimo, estado FROM v_stock`), a.texto),
   },
   productos_con_stock_bajo: {
-    descripcion: "Productos agotados o por debajo del stock mínimo, con su proveedor y cantidad sugerida a pedir.",
+    descripcion: "Productos por debajo de su stock mínimo (solo los que tienen un mínimo puesto), con su proveedor y cantidad sugerida a pedir.",
     ejecutar: (c) => filas(c, "SELECT * FROM v_alertas_stock ORDER BY stock_actual"),
   },
   productos_que_caducan: {

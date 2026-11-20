@@ -11,6 +11,7 @@ import { comprobarPassword, hashPassword } from "./claves";
 import { type C, type Ctx, type Entorno, type Usuario, cuerpo, escribir, fallo } from "./comun";
 import { estadisticas } from "./estadisticas";
 import { facturas } from "./facturas";
+import { fotos, rellenarFotos } from "./fotos";
 import { fiado } from "./fiado";
 import { inventario } from "./inventario";
 import { notas } from "./notas";
@@ -143,6 +144,7 @@ conAcceso.route("/", inventario);
 conAcceso.route("/", avisos);
 conAcceso.route("/", estadisticas);
 conAcceso.route("/", facturas);
+conAcceso.route("/", fotos);
 
 conAcceso.all("*", () => { throw fallo(404, "No encontrado"); });
 
@@ -150,6 +152,9 @@ app.route("/api", conAcceso);
 
 export default {
   fetch: app.fetch,
-  // El cron de wrangler.toml: el aviso de cada mañana
-  scheduled: (_evento: ScheduledController, env: Entorno, ctx: ExecutionContext) => { ctx.waitUntil(avisoDiario(env)); },
+  // El cron de wrangler.toml: el aviso de cada mañana y las fotos que falten
+  scheduled: (_evento: ScheduledController, env: Entorno, ctx: ExecutionContext) => {
+    ctx.waitUntil(avisoDiario(env));
+    ctx.waitUntil(rellenarFotos(env.DB).catch(() => undefined));
+  },
 };

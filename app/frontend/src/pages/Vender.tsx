@@ -4,7 +4,7 @@ import { cantidad, euros, post, type FormaPago, type Oferta, type ProductoStock 
 import type { PropsPagina } from "../App";
 import { BotonEscanear, useLectorGlobal } from "../escaner";
 import { compartirTicket, imprimirTicket } from "../ticket";
-import { Cabecera, CampoNumero, Esqueleto, Modal, Vacio, emitirCambio, useAviso, useDatos } from "../ui";
+import { Cabecera, CampoNumero, Esqueleto, FotoProducto, Modal, Vacio, emitirCambio, useAviso, useDatos } from "../ui";
 import { CLAVE_CODIGO_NUEVO } from "./Catalogo";
 import { ElegirCliente } from "./Fiado";
 
@@ -77,10 +77,13 @@ export default function Vender({ usuario, ir }: PropsPagina) {
     if (p.precio_libre) { setPidiendoPrecio(p); return; }
     if (!p.precio_venta) { avisar("error", `${p.producto} todavía no tiene precio: pónselo en Catálogo`); return; }
     const yaHay = enCarrito(p.id);
-    if (!sinStock(p) && p.stock_actual <= 0) { avisar("error", `${p.producto} está agotado`); return; }
-    if (!sinStock(p) && p.unidad_medida === "unidad" && yaHay + 1 > p.stock_actual) {
-      avisar("error", `Solo quedan ${cantidad(p.stock_actual, p.unidad_medida)} de ${p.producto}`);
-      return;
+    // Sin stock apuntado se vende igual (hay cosas que no se cuentan); solo se
+    // avisa, una vez, al pasarse de lo que hay apuntado
+    const pide = p.unidad_medida === "unidad" ? yaHay + 1 : 0.5;
+    if (!sinStock(p) && pide > p.stock_actual && (yaHay === 0 || yaHay <= p.stock_actual)) {
+      avisar("info", p.stock_actual > 0
+        ? `Según la app solo quedan ${cantidad(p.stock_actual, p.unidad_medida)} de ${p.producto}. Se vende igual.`
+        : `${p.producto} no tiene stock apuntado. Se vende igual.`);
     }
     setCarrito((c) => yaHay
       ? c.map((l) => (l.producto.id === p.id && p.unidad_medida === "unidad" ? { ...l, cantidad: l.cantidad + 1 } : l))
@@ -235,13 +238,11 @@ export default function Vender({ usuario, ir }: PropsPagina) {
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
               {filtrados.map((p) => {
                 const n = enCarrito(p.id);
-                const agotado = !sinStock(p) && p.stock_actual <= 0;
                 const oferta = ofertas.filter((o) => o.producto_id === p.id && o.activa && o.precio < p.precio_venta).sort((a, b) => a.cantidad_minima - b.cantidad_minima)[0];
                 return (
                   <button
                     key={p.id}
                     onClick={() => añadir(p)}
-                    disabled={agotado}
                     className={`tarjeta group relative flex min-h-32 flex-col items-start p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 ${
                       n ? "border-marca-500 ring-2 ring-marca-500/20" : "hover:border-marca-500/60"
                     }`}
@@ -251,15 +252,25 @@ export default function Vender({ usuario, ir }: PropsPagina) {
                         {p.unidad_medida === "kg" ? `${n} kg` : n}
                       </span>
                     )}
-                    <span className="text-xs text-tenue">{p.categoria}</span>
-                    <span className="mt-1 line-clamp-2 pr-6 text-sm font-semibold leading-snug">{p.producto}</span>
+                    {p.imagen_url ? (
+                      <div className="flex w-full items-start gap-2 pr-6">
+                        <FotoProducto url={p.imagen_url} className="size-14" />
+                        <div className="min-w-0">
+                          <span className="block text-xs text-tenue">{p.categoria}</span>
+                          <span className="mt-0.5 line-clamp-3 text-sm font-semibold leading-snug">{p.producto}</span>
+                        </div>
+                      </div>
+                    ) : <>
+                      <span className="text-xs text-tenue">{p.categoria}</span>
+                      <span className="mt-1 line-clamp-2 pr-6 text-sm font-semibold leading-snug">{p.producto}</span>
+                    </>}
                     <div className="mt-auto flex w-full items-end justify-between pt-3">
                       <span className="text-lg font-bold tabular-nums text-marca-fuerte">
                         {p.precio_libre ? <span className="text-sm">Precio libre</span> : !p.precio_venta ? <span className="text-sm text-amber-600 dark:text-amber-400">Sin precio</span> : euros(p.precio_venta)}
                         {p.unidad_medida === "kg" && <span className="text-xs font-medium text-tenue">/kg</span>}
                       </span>
-                      <span className={`whitespace-nowrap text-[11px] font-medium ${agotado ? "text-rose-500" : p.estado === "BAJO" ? "text-amber-600 dark:text-amber-400" : "text-tenue"}`}>
-                        {agotado ? "agotado" : sinStock(p) ? "" : cantidad(p.stock_actual, p.unidad_medida)}
+                      <span className={`whitespace-nowrap text-[11px] font-medium ${p.estado === "BAJO" ? "text-amber-600 dark:text-amber-400" : "text-tenue"}`}>
+                        {sinStock(p) || p.stock_actual <= 0 ? "" : cantidad(p.stock_actual, p.unidad_medida)}
                       </span>
                     </div>
                     {oferta && (
@@ -336,8 +347,8 @@ function Ticket({ carrito, total, cambiar, vaciar, cobrar, ultima, imprimir, com
             const siguiente = linea.libre == null && ofertas.filter((o) => o.producto_id === p.id && o.activa && o.cantidad_minima > n && o.precio < unitario).sort((a, b) => a.cantidad_minima - b.cantidad_minima)[0];
             return (
             <li key={p.id} className="border-b border-borde py-3 last:border-0">
-              <div className="flex justify-between gap-2 text-sm">
-                <span className="font-medium">{p.producto}</span>
+              <div className="flex items-center justify-between gap-2 text-sm">
+                <span className="flex min-w-0 items-center gap-2 font-medium"><FotoProducto url={p.imagen_url} className="size-8" />{p.producto}</span>
                 <span className="font-semibold tabular-nums">{euros(importe(linea, ofertas))}</span>
               </div>
               <div className="mt-2 flex items-center gap-2">
@@ -346,7 +357,7 @@ function Ticket({ carrito, total, cambiar, vaciar, cobrar, ultima, imprimir, com
                     <CampoNumero
                       decimales={3} valor={n} aria-label="Peso en kg" placeholder="0"
                       alCambiar={(v) => cambiar(p.id, v ?? 0, false)}
-                      className={`campo w-20 px-2 py-1 text-center ${(!sinStock(p) && n > p.stock_actual) || !n ? "border-rose-500" : ""}`}
+                      className={`campo w-20 px-2 py-1 text-center ${!n ? "border-rose-500" : ""}`}
                     />
                     <span className="text-xs text-tenue">kg</span>
                     {PESOS.map((w) => (
@@ -359,7 +370,7 @@ function Ticket({ carrito, total, cambiar, vaciar, cobrar, ultima, imprimir, com
                   <div className="flex items-center rounded-xl border border-borde">
                     <button className="p-1.5 text-suave hover:text-texto" onClick={() => cambiar(p.id, n - 1)} aria-label="Quitar uno"><Minus className="size-3.5" /></button>
                     <span className="w-8 text-center text-sm font-semibold tabular-nums">{n}</span>
-                    <button className="p-1.5 text-suave hover:text-texto disabled:opacity-30" disabled={!sinStock(p) && n >= p.stock_actual} onClick={() => cambiar(p.id, n + 1)} aria-label="Añadir uno"><Plus className="size-3.5" /></button>
+                    <button className="p-1.5 text-suave hover:text-texto disabled:opacity-30" onClick={() => cambiar(p.id, n + 1)} aria-label="Añadir uno"><Plus className="size-3.5" /></button>
                   </div>
                 )}
                 {linea.libre == null && <span className={`text-xs ${conOferta ? "font-semibold text-amber-700 dark:text-amber-400" : "text-tenue"}`}>× {euros(unitario)}{conOferta ? " oferta" : ""}</span>}

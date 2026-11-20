@@ -205,7 +205,6 @@ describe("mermas", () => {
 
   it("rechaza lo que no cuadra sin guardar nada", async () => {
     const casos: [Record<string, unknown>, string][] = [
-      [{ producto_id: 1, cantidad: 999, motivo: "roto" }, "mayor que el stock"],
       [{ producto_id: 1, cantidad: 1, motivo: "roto", lote_id: 10 }, "no corresponde"],
       [{ producto_id: 1, cantidad: 1, motivo: "aburrimiento" }, "motivo"],
       [{ producto_id: 999, cantidad: 1, motivo: "roto" }, "no existe"],
@@ -218,6 +217,11 @@ describe("mermas", () => {
     }
     expect(await contar("mermas")).toBe(0);
     expect(await stock(1)).toBe(20000);
+  });
+
+  it("una merma mayor que el stock apuntado se guarda y deja el stock en 0", async () => {
+    expect((await dependiente("/mermas", "POST", { producto_id: 1, cantidad: 999, motivo: "roto" })).status).toBe(200);
+    expect(await stock(1)).toBe(0);
   });
 });
 
@@ -742,6 +746,48 @@ describe("asistente: acciones y voz", () => {
     const mal = await admin("/asistente", "POST", { audio: { tipo: "audio/mp4", datos: "AAAA" } });
     expect(mal.status).toBe(400);
     expect((await mal.json<any>()).detail).toContain("No he entendido");
+  });
+});
+
+describe("fotos de los productos", () => {
+  const FOTO = "https://images.openfoodfacts.org/images/products/841/000/000/0000/front_es.3.400.jpg";
+  const simularOff = (conFoto: Set<string>) => vi.spyOn(globalThis, "fetch").mockImplementation(async (u) => {
+    const codigo = /product\/(\d+)\.json/.exec(String(u))?.[1] ?? "";
+    return Response.json(conFoto.has(codigo) ? { status: 1, product: { image_front_url: FOTO } } : { status: 0 });
+  });
+  const fotoDe = (id: number) => db.prepare("SELECT imagen_url FROM productos WHERE id = ?").bind(id).first<string | null>("imagen_url");
+
+  it("al dar de alta con código se busca la foto; sin código no", async () => {
+    simularOff(new Set(["8410000000001"]));
+    const con = await json(admin("/productos", "POST", { nombre: "Galletas", categoria_id: 1, codigo_barras: "8410000000001" }));
+    const sin = await json(admin("/productos", "POST", { nombre: "Pan", categoria_id: 1 }));
+    const otro = await json(admin("/productos", "POST", { nombre: "Raro", categoria_id: 1, codigo_barras: "8410000000002" }));
+    expect(await fotoDe(con.id)).toBe(FOTO);
+    expect(await fotoDe(sin.id)).toBe("");
+    expect(await fotoDe(otro.id)).toBe(""); // se buscó y no hay
+    expect((await json<any[]>(dependiente("/productos"))).find((p) => p.id === con.id).imagen_url).toBe(FOTO);
+  });
+
+  it("rellena las que faltan de 20 en 20, y al cambiar el código la vuelve a buscar", async () => {
+    const espia = simularOff(new Set(["111"]));
+    await db.prepare("UPDATE productos SET codigo_barras = '84100000000' || id WHERE id <> 1").run();
+    await db.prepare("UPDATE productos SET codigo_barras = '11111111' WHERE id = 1").run();
+    const r = await json(admin("/productos/fotos", "POST"));
+    expect(r).toMatchObject({ buscadas: 5, encontradas: 0, pendientes: 0 });
+    expect(espia).toHaveBeenCalledTimes(5);
+    // Ya buscadas: no se repiten
+    expect(await json(admin("/productos/fotos", "POST"))).toMatchObject({ buscadas: 0 });
+
+    simularOff(new Set(["8410000000009"]));
+    await admin("/productos/1", "PATCH", { codigo_barras: "8410000000009" });
+    expect(await fotoDe(1)).toBeNull();
+    await admin("/productos/fotos", "POST");
+    expect(await fotoDe(1)).toBe(FOTO);
+    // Quitar una foto que no es; y no se acepta una dirección cualquiera
+    expect((await admin("/productos/1", "PATCH", { imagen_url: "" })).status).toBe(200);
+    expect(await fotoDe(1)).toBe("");
+    expect((await admin("/productos/1", "PATCH", { imagen_url: "https://malo.example/x.jpg" })).status).toBe(400);
+    expect((await dependiente("/productos/fotos", "POST")).status).toBe(403);
   });
 });
 

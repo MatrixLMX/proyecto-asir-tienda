@@ -5,6 +5,7 @@ import {
   enteroUrl, escribir, fallo, fechaONula, filas, idRuta, lista, milli, normalizar, ordenar, soloAdmin, texto,
 } from "./comun";
 import { claveAlias } from "./facturas";
+import { fotoDe, fotoValida } from "./fotos";
 
 export const catalogo = new Hono<Ctx>();
 
@@ -219,18 +220,22 @@ catalogo.post("/productos", soloAdmin, async (c) => {
   if (!iva) throw fallo(400, "Revisa la categoría");
   // Si se indica el stock que ya hay, se registra como una compra de "stock
   // inicial" (así entran el coste y, si caduca, el lote), en la misma transacción.
+  const codigo = texto(p.codigo_barras, "el código de barras", 20);
+  // Con código de barras, la foto se busca a la vez (si no hay internet, se
+  // queda pendiente y se busca más tarde)
+  const foto = codigo && /^\d{8,14}$/.test(codigo) ? await fotoDe(codigo) : "";
   const r = await escribir(c, [
     db.prepare(
       `INSERT INTO productos (nombre, codigo_barras, categoria_id, proveedor_id, iva_id, unidad_medida, precio_venta_cent,
                               stock_minimo_milli, controla_caducidad, vida_util_dias, dias_aviso_caducidad, coste_medio_dm,
-                              control_stock, precio_libre, acceso_rapido)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                              control_stock, precio_libre, acceso_rapido, imagen_url)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
-      nombre, texto(p.codigo_barras, "el código de barras", 20), categoria, proveedor,
+      nombre, codigo, categoria, proveedor,
       iva, unidad, cent(p.precio_venta ?? 0, "el precio de venta"), controlStock ? milli(p.stock_minimo ?? 0, "el stock mínimo") : 0,
       controlStock ? booleano(p.controla_caducidad ?? false, "la caducidad") : 0, controlStock ? enteroONulo(p.vida_util_dias, "la vida útil") || null : null,
       entero(p.dias_aviso_caducidad ?? 5, "los días de aviso", 255), coste,
-      controlStock, precioLibre, booleano(p.acceso_rapido ?? false, "el acceso rápido"),
+      controlStock, precioLibre, booleano(p.acceso_rapido ?? false, "el acceso rápido"), foto,
     ),
     ...(stockInicial ? [
       pasoCompra(c, proveedor, null, `Stock inicial al dar de alta: ${nombre}`),
@@ -257,6 +262,11 @@ const CAMPOS_PRODUCTO: Record<string, Campo> = {
   control_stock: ["control_stock", (v) => booleano(v, "el control de stock")],
   precio_libre: ["precio_libre", (v) => booleano(v, "el precio libre")],
   acceso_rapido: ["acceso_rapido", (v) => booleano(v, "el acceso rápido")],
+  // Solo para quitar una foto que no es ("") o poner otra de Open Food Facts
+  imagen_url: ["imagen_url", (v) => {
+    if (v === null || v === "" || fotoValida(v)) return v;
+    throw fallo(400, "Revisa la foto");
+  }],
 };
 
 catalogo.patch("/productos/:id", soloAdmin, async (c) => {
@@ -266,6 +276,11 @@ catalogo.patch("/productos/:id", soloAdmin, async (c) => {
   const datos = sinNulos(await cuerpo(c), ["nombre", "categoria_id", "iva_id", "precio_venta", "stock_minimo",
     "controla_caducidad", "dias_aviso_caducidad", "activo", "coste_medio", "control_stock", "precio_libre", "acceso_rapido"]);
   if (datos.control_stock === false || datos.control_stock === 0) datos.controla_caducidad = false;
+  // Si cambia el código de barras, la foto se vuelve a buscar
+  if ("codigo_barras" in datos && !("imagen_url" in datos)) {
+    const antes = await c.env.DB.prepare("SELECT codigo_barras FROM productos WHERE id = ?").bind(id).first<string | null>("codigo_barras");
+    if ((antes ?? null) !== (datos.codigo_barras || null)) datos.imagen_url = null;
+  }
   const { sets, valores } = cambios(datos, CAMPOS_PRODUCTO);
   if (!sets) return c.json({ ok: true });
   const db = c.env.DB;

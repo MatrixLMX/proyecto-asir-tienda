@@ -11,6 +11,7 @@ const LeerFactura = lazy(() => import("./LeerFactura"));
 
 export interface ProductoAdmin {
   id: number;
+  imagen_url: string | null;
   nombre: string;
   codigo_barras: string | null;
   categoria: string;
