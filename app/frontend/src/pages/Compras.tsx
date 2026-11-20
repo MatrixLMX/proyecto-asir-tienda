@@ -64,7 +64,7 @@ export default function Compras() {
 
   return (
     <>
-      <Cabecera titulo="Compras" subtitulo="Lo que entra de los proveedores. Los costes van sin IVA.">
+      <Cabecera titulo="Compras" subtitulo="Lo que entra de los proveedores. Los precios de compra, con el IVA incluido.">
         <Pestañas<Vista> valor={vista} alCambiar={setVista} opciones={[
           { id: "nueva", nombre: "Registrar compra" }, { id: "pedido", nombre: "Qué pedir" }, { id: "historial", nombre: "Historial" },
         ]} />
@@ -130,9 +130,9 @@ function NuevaCompra({ inicial }: { inicial: Precarga | null }) {
       const r = await post<{ id: number; total_sin_iva: number }>("/compras", {
         proveedor_id: proveedor || null,
         numero_factura: factura || null,
-        lineas: validas.map(({ clave: _, ...l }) => ({ ...l, coste_unitario: l.coste_unitario ?? 0, fecha_caducidad: l.fecha_caducidad || null })),
+        lineas: validas.map(({ clave: _, ...l }) => ({ ...l, coste_unitario: l.coste_unitario, fecha_caducidad: l.fecha_caducidad || null })),
       });
-      avisar("ok", `Compra nº ${r.id} guardada (${euros(r.total_sin_iva)} sin IVA). Stock actualizado.`);
+      avisar("ok", `Compra nº ${r.id} guardada (${euros(r.total_sin_iva)}). Stock actualizado.`);
       setLineas([lineaVacia()]);
       setFactura("");
       emitirCambio();
@@ -184,8 +184,8 @@ function NuevaCompra({ inicial }: { inicial: Precarga | null }) {
                       <CampoNumero decimales={p?.unidad_medida === "kg" ? 3 : 0} valor={l.cantidad} alCambiar={(n) => editar(l.clave, { cantidad: n })} />
                     </div>
                     <div>
-                      <label className="etiqueta">Coste/ud. sin IVA</label>
-                      <CampoNumero decimales={4} valor={l.coste_unitario} alCambiar={(n) => editar(l.clave, { coste_unitario: n })} />
+                      <label className="etiqueta">Precio/ud. (IVA incl.)</label>
+                      <CampoNumero decimales={4} placeholder="Si no lo sabes, vacío" valor={l.coste_unitario} alCambiar={(n) => editar(l.clave, { coste_unitario: n })} />
                     </div>
                     <div>
                       <label className="etiqueta">Caducidad</label>
@@ -226,7 +226,7 @@ function NuevaCompra({ inicial }: { inicial: Precarga | null }) {
             <div className="flex justify-between"><dt className="text-suave">Líneas</dt><dd className="font-medium">{validas.length}</dd></div>
           </dl>
           <div className="my-4 flex items-baseline justify-between border-t border-borde pt-4">
-            <span className="text-sm text-suave">Total sin IVA</span>
+            <span className="text-sm text-suave">Total</span>
             <span className="text-2xl font-bold tabular-nums">{euros(total)}</span>
           </div>
           <button className="boton w-full py-3" disabled={!validas.length || guardando} onClick={guardar}>Guardar compra</button>
@@ -323,12 +323,12 @@ function Historial() {
         <select className="campo w-auto py-1.5" aria-label="Periodo" value={dias} onChange={(e) => setDias(Number(e.target.value))}>
           <option value={30}>Últimos 30 días</option><option value={90}>Últimos 3 meses</option><option value={365}>Último año</option><option value={3650}>Todas</option>
         </select>
-        {datos && <span className="text-sm text-suave">{datos.length} compras · {euros(datos.reduce((t, c) => t + c.total_sin_iva, 0))} sin IVA</span>}
+        {datos && <span className="text-sm text-suave">{datos.length} compras · {euros(datos.reduce((t, c) => t + c.total_sin_iva, 0))}</span>}
       </div>
       <div className="tarjeta overflow-x-auto">
         {!datos ? <div className="p-5"><Esqueleto className="h-40" /></div> : !datos.length ? <Vacio icono={<Truck className="size-6" />} titulo="Sin compras en este periodo" /> : (
           <table className="tabla w-full text-sm">
-            <thead><tr><th>Nº</th><th>Fecha</th><th>Proveedor</th><th className="hidden sm:table-cell">Factura</th><th className="hidden text-right sm:table-cell">Líneas</th><th className="text-right">Total sin IVA</th></tr></thead>
+            <thead><tr><th>Nº</th><th>Fecha</th><th>Proveedor</th><th className="hidden sm:table-cell">Factura</th><th className="hidden text-right sm:table-cell">Líneas</th><th className="text-right">Total</th></tr></thead>
             <tbody>
               {datos.map((c) => (
                 <tr key={c.id} className="cursor-pointer hover:bg-superficie-2/60" onClick={() => setAbierta(c.id)}>
@@ -359,7 +359,7 @@ function Historial() {
                 </li>
               ))}
             </ul>
-            <div className="mb-5 flex items-baseline justify-between"><span className="text-suave">Total sin IVA</span><span className="text-2xl font-bold tabular-nums">{euros(detalle.datos.total_sin_iva)}</span></div>
+            <div className="mb-5 flex items-baseline justify-between"><span className="text-suave">Total</span><span className="text-2xl font-bold tabular-nums">{euros(detalle.datos.total_sin_iva)}</span></div>
             <div className="flex justify-end">
               <button className="boton-sec text-rose-600 dark:text-rose-400" onClick={() => setABorrar(detalle.datos!.id)}><Trash2 className="size-4" /> Borrar compra</button>
             </div>

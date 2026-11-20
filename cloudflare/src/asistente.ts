@@ -130,7 +130,7 @@ const DE_ADMIN: Record<string, Herramienta> = {
        WHERE m.fecha >= ${desde} ORDER BY m.fecha DESC LIMIT 100`, limitado(a.dias, 30, 365)),
   },
   pedido_sugerido: {
-    descripcion: "Qué pedir a cada proveedor (productos con stock bajo), cuánto y el coste estimado sin IVA.",
+    descripcion: "Qué pedir a cada proveedor (productos con stock bajo), cuánto y el coste estimado (IVA incluido).",
     ejecutar: (c) => filas(c, `
       SELECT COALESCE(a.proveedor, 'Sin proveedor') AS proveedor, a.producto, a.unidad_medida, a.stock_actual, a.cantidad_sugerida,
              ROUND(a.cantidad_sugerida * p.coste_medio_dm / 100.0) / 100.0 AS coste_estimado
@@ -153,7 +153,7 @@ function instrucciones(rol: string, dia: string) {
     "",
     "- Responde en español, breve y claro, como hablarías con alguien de la familia que lleva la tienda. Usa euros con coma decimal (1,25 €) y kg cuando toque.",
     "- Usa siempre las herramientas para obtener datos; no inventes cifras, productos ni fechas. Si una herramienta no devuelve nada, dilo.",
-    '- "Beneficio" es siempre el real: base imponible (precio sin IVA) menos coste de compra.',
+    '- "Beneficio" es siempre el real: lo cobrado (con IVA) menos lo que costó comprarlo (también con IVA: la tienda paga el IVA a sus proveedores y no lo descuenta). Los precios de compra siempre llevan el IVA incluido.',
     "- Cuando des recomendaciones (qué pedir, qué retirar, qué precio revisar), básalas en los datos y explica el porqué en una frase.",
     "",
     "Cambios en la tienda:",
@@ -161,7 +161,7 @@ function instrucciones(rol: string, dia: string) {
     "- Nunca digas que algo ya está hecho, añadido o guardado: di que lo tiene preparado para confirmar, y resume en una línea qué es.",
     "- Antes de preparar algo de un producto, búscalo con buscar_productos y usa su id. Si hay varios que encajan y no está claro cuál es, pregunta cuál antes de preparar nada. No adivines.",
     "- Si el producto no existe y quiere meterlo, prepara el alta con proponer_producto_nuevo (con el stock que entra en stock_inicial), no una compra.",
-    '- En compras la cantidad son unidades sueltas ("dos cajas de doce" son 24) o kilos. El precio de compra es SIN IVA y el de venta CON IVA. En una compra, un precio sin más es el de compra; si no lo dicen, no lo pongas.',
+    '- En compras la cantidad son unidades sueltas ("dos cajas de doce" son 24) o kilos. Los precios de compra y de venta llevan el IVA incluido. En una compra, un precio sin más es el de compra; si no lo dicen, no lo pongas (se puede poner luego, cuando llegue la factura).',
     "- Si piden varias cosas a la vez, prepáralas todas en la misma respuesta.",
     "- Los mensajes de voz llegan transcritos y pueden traer errores en nombres o números: si algo no cuadra (cantidades raras, un producto que no existe), pregunta.",
   ];

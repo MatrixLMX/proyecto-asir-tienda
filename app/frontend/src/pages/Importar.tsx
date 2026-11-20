@@ -135,7 +135,7 @@ export default function Importar({ abierto, alCerrar }: { abierto: boolean; alCe
   return (
     <Modal abierto={abierto} alCerrar={cerrar} titulo="Importar productos desde Excel" ancho="max-w-lg">
       <div className="space-y-4 text-sm">
-        <p className="text-suave">Hace falta nombre, categoría e IVA. El precio se puede dejar vacío y ponerlo después. Lo que ya está en el catálogo (mismo nombre o código) no se toca, así que puedes repetir la importación sin miedo.</p>
+        <p className="text-suave">Hace falta nombre y categoría. El IVA es opcional (si no, el de la categoría) y los precios se pueden dejar vacíos y ponerlos después; el de compra, con IVA incluido. Lo que ya está en el catálogo (mismo nombre o código) no se toca, así que puedes repetir la importación sin miedo.</p>
         <div className="flex flex-wrap gap-2">
           <label className="boton cursor-pointer"><Upload className="size-4" /> Elegir fichero
             <input type="file" className="sr-only" accept=".xlsx,.csv,.txt" onChange={alElegir} disabled={ocupado} />

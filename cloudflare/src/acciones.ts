@@ -12,8 +12,8 @@ import { type C, type Datos, filas, normalizar, palabras, parecido } from "./com
 
 export type Accion =
   | { tipo: "compra"; proveedor_id: number | null; proveedor: string | null;
-      lineas: { producto_id: number; nombre: string; unidad_medida: string; cantidad: number; coste_unitario: number; necesita_fecha: boolean }[] }
-  | { tipo: "producto"; nombre: string; categoria_id: number | null; iva_id: number | null; unidad_medida: "unidad" | "kg";
+      lineas: { producto_id: number; nombre: string; unidad_medida: string; cantidad: number; coste_unitario: number | null; necesita_fecha: boolean }[] }
+  | { tipo: "producto"; nombre: string; categoria_id: number | null; unidad_medida: "unidad" | "kg";
       precio_venta: number | null; coste_compra: number | null; stock_inicial: number; codigo_barras: string | null }
   | { tipo: "precio"; producto_id: number; nombre: string; antes: number; precio_venta: number }
   | { tipo: "merma"; producto_id: number; nombre: string; unidad_medida: string; cantidad: number; motivo: string }
@@ -113,7 +113,7 @@ export const ACCIONES_ADMIN: Record<string, Herramienta> = {
           properties: {
             producto_id: idProducto,
             cantidad: { type: "NUMBER", description: "Unidades sueltas que entran (2 cajas de 12 = 24), o kg" },
-            coste_unitario: { type: "NUMBER", description: "Precio de compra de UNA unidad (o kg) SIN IVA. Omítelo si no lo dicen: se usa el coste habitual." },
+            coste_unitario: { type: "NUMBER", description: "Precio de compra de UNA unidad (o kg), IVA incluido. Omítelo si no lo dicen: se puede poner más tarde." },
           },
           required: ["producto_id", "cantidad"],
         },
@@ -131,8 +131,8 @@ export const ACCIONES_ADMIN: Record<string, Herramienta> = {
         if (!p) { fallos.push(noEncontrado(l?.producto_id)); continue; }
         const cantidad = numero(l.cantidad);
         if (!cantidad) { fallos.push(`Falta la cantidad de ${p.nombre}.`); continue; }
-        const coste = numero(l.coste_unitario, 1e5) ?? p.coste_medio;
-        lineas.push({ producto_id: p.id, nombre: p.nombre, unidad_medida: p.unidad_medida, cantidad: redondeo(cantidad, 3), coste_unitario: redondeo(coste, 4),
+        const coste = numero(l.coste_unitario, 1e5);
+        lineas.push({ producto_id: p.id, nombre: p.nombre, unidad_medida: p.unidad_medida, cantidad: redondeo(cantidad, 3), coste_unitario: coste === null ? null : redondeo(coste, 4),
           necesita_fecha: !!p.controla_caducidad && !p.vida_util_dias });
         deProveedor.push(p.proveedor_id);
       }
@@ -142,7 +142,7 @@ export const ACCIONES_ADMIN: Record<string, Herramienta> = {
       // Si no lo dicen y todos los productos son del mismo proveedor, ese
       if (!a.proveedor && deProveedor.every((x) => x && x === deProveedor[0])) prov = proveedores.find((x) => x.id === deProveedor[0]) ?? null;
       if (!añadir(acciones, { tipo: "compra", proveedor_id: prov?.id ?? null, proveedor: prov?.nombre ?? (a.proveedor ? String(a.proveedor).slice(0, 100) : null), lineas })) return DEMASIADAS;
-      const resumen = lineas.map((l) => `${l.nombre} +${l.cantidad} a ${l.coste_unitario} €`).join("; ");
+      const resumen = lineas.map((l) => `${l.nombre} +${l.cantidad}${l.coste_unitario === null ? " (sin precio de compra)" : ` a ${l.coste_unitario} €`}`).join("; ");
       return `${PENDIENTE} Compra${prov ? ` a ${prov.nombre}` : a.proveedor ? ` (el proveedor "${String(a.proveedor)}" no está dado de alta: lo elegirá en la tarjeta)` : ""}: ${resumen}.`
         + (lineas.some((l) => l.necesita_fecha) ? " Alguno controla caducidad: tendrá que poner la fecha en la tarjeta." : "")
         + (fallos.length ? ` No se ha podido añadir: ${fallos.join(" ")}` : "");
@@ -153,8 +153,7 @@ export const ACCIONES_ADMIN: Record<string, Herramienta> = {
     parametros: {
       nombre: { type: "STRING", description: "Nombre corto y claro como se verá en la tienda, p. ej. \"Galletas de chocolate 500 g\"" },
       precio_venta: { type: "NUMBER", description: "Precio de venta al público CON IVA" },
-      coste_compra: { type: "NUMBER", description: "Precio de compra SIN IVA" },
-      iva: { type: "NUMBER", description: "Porcentaje de IVA (4, 10, 21...), si lo dicen o es evidente por el tipo de producto" },
+      coste_compra: { type: "NUMBER", description: "Precio de compra, IVA incluido (lo que se paga por una unidad)" },
       categoria: { type: "STRING", description: "Categoría del catálogo a la que pertenece" },
       por_kg: { type: "BOOLEAN", description: "true si se vende a peso" },
       stock_inicial: { type: "NUMBER", description: "Unidades (o kg) que entran ahora, si las dicen" },
@@ -168,20 +167,17 @@ export const ACCIONES_ADMIN: Record<string, Herramienta> = {
       const repetido = iguales.find((p) => normalizar(p.nombre) === normalizar(nombre));
       if (repetido) return `Ya existe un producto llamado "${repetido.nombre}" (id ${repetido.id}). Si quiere sumar stock usa proponer_compra; si quiere otro distinto, usa otro nombre.`;
       const categorias = await filas<{ id: number; nombre: string }>(c, "SELECT id, nombre FROM categorias WHERE activa");
-      const ivas = await filas<{ id: number; porcentaje: number }>(c, "SELECT id, porcentaje_cp / 100.0 AS porcentaje FROM tipos_iva");
-      const pct = numero(a.iva, 100);
       const cat = elegir(categorias, a.categoria);
-      const iva = pct === null ? null : ivas.find((i) => i.porcentaje === pct) ?? null;
       const codigo = String(a.codigo_barras ?? "").replace(/\D/g, "");
       const pvp = numero(a.precio_venta, 1e5), coste = numero(a.coste_compra, 1e5);
       const accion: Accion = {
-        tipo: "producto", nombre, categoria_id: cat?.id ?? null, iva_id: iva?.id ?? null, unidad_medida: a.por_kg === true ? "kg" : "unidad",
+        tipo: "producto", nombre, categoria_id: cat?.id ?? null, unidad_medida: a.por_kg === true ? "kg" : "unidad",
         precio_venta: pvp === null ? null : redondeo(pvp, 2), coste_compra: coste === null ? null : redondeo(coste, 4),
         stock_inicial: redondeo(numero(a.stock_inicial) ?? 0, 3), codigo_barras: codigo.length >= 8 && codigo.length <= 14 ? codigo : null,
       };
       if (!añadir(acciones, accion)) return DEMASIADAS;
-      const faltan = [!cat && "la categoría", !iva && "el IVA", pvp === null && "el precio de venta"].filter(Boolean);
-      return `${PENDIENTE} Producto nuevo: ${nombre}${cat ? `, categoría ${cat.nombre}` : ""}${iva ? `, IVA ${iva.porcentaje} %` : ""}.`
+      const faltan = [!cat && "la categoría", pvp === null && "el precio de venta"].filter(Boolean);
+      return `${PENDIENTE} Producto nuevo: ${nombre}${cat ? `, categoría ${cat.nombre}` : ""}.`
         + (faltan.length ? ` Falta ${faltan.join(", ")}: puede ponerlo en la tarjeta. Categorías que hay: ${categorias.map((x) => x.nombre).join(", ")}.` : "");
     },
   },

@@ -36,10 +36,9 @@ interface InfoCodigo {
 /** Vender guarda aquí un código que no está en el catálogo para crearlo. */
 export const CLAVE_CODIGO_NUEVO = "tienda_codigo_nuevo";
 
-const margenDe = (precio: number, iva: number, coste: number) => {
-  const base = precio / (1 + iva / 100);
-  return base ? ((base - coste) / base) * 100 : 0;
-};
+// Precio de venta y de compra llevan el IVA incluido: el margen es lo que
+// queda de lo que paga el cliente
+const margenDe = (precio: number, coste: number) => (precio ? ((precio - coste) / precio) * 100 : 0);
 const pct = (n: number) => `${n.toLocaleString("es-ES", { maximumFractionDigits: 1 })} %`;
 const redondear = (n: number, d = 4) => Math.round(n * 10 ** d) / 10 ** d;
 const MARGEN_OBJETIVO = 30;
@@ -124,10 +123,16 @@ function Productos() {
   const [escaneando, setEscaneando] = useState(false);
   const [soloSinPrecio, setSoloSinPrecio] = useState(false);
   const sinPrecio = (p: ProductoAdmin) => !p.precio_libre && !p.precio_venta;
-  const numSinPrecio = (productos.datos ?? []).filter((p) => p.activo && sinPrecio(p)).length;
+  const sinCoste = (p: ProductoAdmin) => !p.precio_libre && !p.coste_medio;
+  // Productos a los que les falta algún dato: el precio de venta o el de compra
+  const faltaAlgo = (p: ProductoAdmin) => sinPrecio(p) || sinCoste(p);
+  const activos = (productos.datos ?? []).filter((p) => p.activo);
+  const numSinPrecio = activos.filter(faltaAlgo).length;
+  const numSinVenta = activos.filter(sinPrecio).length;
+  const numSinCoste = activos.filter(sinCoste).length;
   useEffect(() => { if (!numSinPrecio) setSoloSinPrecio(false); }, [numSinPrecio]);
 
-  const filas = useMemo(() => (productos.datos ?? []).filter((p) => (bajas || p.activo) && (!soloSinPrecio || sinPrecio(p)) &&
+  const filas = useMemo(() => (productos.datos ?? []).filter((p) => (bajas || p.activo) && (!soloSinPrecio || faltaAlgo(p)) &&
     `${p.nombre} ${p.categoria} ${p.proveedor ?? ""} ${p.codigo_barras ?? ""}`.toLowerCase().includes(q.toLowerCase())), [productos.datos, q, bajas, soloSinPrecio]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const nuevo = (codigo = "") => { setInfo(null); setForm({ id: null, datos: { ...productoVacio, codigo_barras: codigo } }); if (codigo) buscarCodigo(codigo, true); };
@@ -172,7 +177,7 @@ function Productos() {
     const caduca = d.control_stock && d.controla_caducidad;
     const cuerpo = {
       nombre: d.nombre.trim(), codigo_barras: d.codigo_barras.trim() || null, categoria_id: d.categoria_id, proveedor_id: d.proveedor_id || null,
-      iva_id: d.iva_id, precio_venta: d.precio_venta ?? 0, stock_minimo: d.stock_minimo ?? 0, controla_caducidad: caduca,
+      ...(d.iva_id ? { iva_id: d.iva_id } : {}), precio_venta: d.precio_venta ?? 0, stock_minimo: d.stock_minimo ?? 0, controla_caducidad: caduca,
       vida_util_dias: caduca && d.vida_util_dias ? d.vida_util_dias : null, dias_aviso_caducidad: d.dias_aviso_caducidad ?? 5,
       control_stock: d.control_stock, precio_libre: d.precio_libre, acceso_rapido: d.acceso_rapido,
     };
@@ -191,7 +196,6 @@ function Productos() {
     if (ok) setForm(null);
   }
 
-  const ivaElegido = ivas.datos?.find((i) => i.id === form?.datos.iva_id)?.porcentaje;
   const porKg = form?.datos.unidad_medida === "kg" ? "/kg" : "";
   const hoyMas = (dias: number) => fecha(diaISO(dias));
 
@@ -206,9 +210,9 @@ function Productos() {
           <input type="checkbox" className="size-4 accent-emerald-600" checked={bajas} onChange={(e) => setBajas(e.target.checked)} /> Ver dados de baja
         </label>
         <div className="grid w-full grid-cols-2 gap-2 sm:ml-auto sm:flex sm:w-auto">
-          <button className="boton-sec" disabled={!filas.length} onClick={() => descargarCsv("catalogo", filas.map((p) => ({ ...p, margen: margenDe(p.precio_venta, p.iva, p.coste_medio) })), [
-            ["nombre", "Producto"], ["codigo_barras", "Código"], ["categoria", "Categoría"], ["proveedor", "Proveedor"], ["iva", "IVA %"],
-            ["coste_medio", "Coste sin IVA"], ["precio_venta", "PVP"], ["margen", "Margen %"], ["stock_actual", "Stock"], ["unidad_medida", "Unidad"]])}>
+          <button className="boton-sec" disabled={!filas.length} onClick={() => descargarCsv("catalogo", filas.map((p) => ({ ...p, margen: margenDe(p.precio_venta, p.coste_medio) })), [
+            ["nombre", "Producto"], ["codigo_barras", "Código"], ["categoria", "Categoría"], ["proveedor", "Proveedor"], ["iva", "IVA ticket %"],
+            ["coste_medio", "Coste (IVA incl.)"], ["precio_venta", "PVP"], ["margen", "Margen %"], ["stock_actual", "Stock"], ["unidad_medida", "Unidad"]])}>
             <Download className="size-4" /> CSV
           </button>
           <button className="boton-sec" onClick={() => setImportando(true)}><FileSpreadsheet className="size-4" /> Importar</button>
@@ -220,8 +224,11 @@ function Productos() {
         <button onClick={() => setSoloSinPrecio(!soloSinPrecio)} aria-pressed={soloSinPrecio}
           className={`mb-4 flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition ${soloSinPrecio ? "border-amber-500 bg-amber-500/15" : "border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/15"}`}>
           <Tag className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-          <span className="flex-1"><b>{numSinPrecio} {numSinPrecio === 1 ? "producto sin precio" : "productos sin precio"}</b>
-            <span className="block text-xs text-suave">No se pueden vender hasta que lo tengan. {soloSinPrecio ? "Escribe el precio y pulsa Guardar." : "Toca aquí para ponerles precio."}</span></span>
+          <span className="flex-1"><b>{numSinPrecio} {numSinPrecio === 1 ? "producto con datos sin poner" : "productos con datos sin poner"}</b>
+            <span className="block text-xs text-suave">
+              {[numSinVenta && `${numSinVenta} sin precio de venta (no se pueden vender)`, numSinCoste && `${numSinCoste} sin precio de compra`].filter(Boolean).join(" · ")}.
+              {" "}{soloSinPrecio ? "Escríbelos y pulsa Guardar." : "Toca aquí para ponerlos."}
+            </span></span>
           <span className="text-xs font-medium text-amber-700 dark:text-amber-300">{soloSinPrecio ? "Ver todos" : "Poner precios"}</span>
         </button>
       )}
@@ -245,15 +252,15 @@ function Productos() {
             </thead>
             <tbody>
               {filas.map((p) => {
-                const margen = margenDe(p.precio_venta, p.iva, p.coste_medio);
+                const margen = margenDe(p.precio_venta, p.coste_medio);
                 return (
                   <tr key={p.id} className={`cursor-pointer hover:bg-superficie-2/60 ${p.activo ? "" : "opacity-50"}`} onClick={() => editar(p)}>
                     <td>
                       <p className="font-medium">{p.nombre} {!p.activo && <Insignia color="gris">de baja</Insignia>}</p>
-                      <p className="text-xs text-tenue">{p.categoria} · IVA {p.iva} %{p.controla_caducidad ? " · caduca" : ""}{p.codigo_barras ? ` · ${p.codigo_barras}` : ""}</p>
+                      <p className="text-xs text-tenue">{p.categoria}{p.controla_caducidad ? " · caduca" : ""}{p.codigo_barras ? ` · ${p.codigo_barras}` : ""}</p>
                     </td>
                     <td className="hidden text-suave md:table-cell">{p.proveedor ?? "—"}</td>
-                    <td className="text-right tabular-nums text-suave">{p.coste_medio ? euros(p.coste_medio) : <span className={p.precio_libre ? "text-tenue" : "text-amber-600 dark:text-amber-400"}>{p.precio_libre ? "—" : "sin coste"}</span>}</td>
+                    <td className="text-right tabular-nums text-suave">{p.coste_medio ? euros(p.coste_medio) : <span className={p.precio_libre ? "text-tenue" : "text-amber-600 dark:text-amber-400"}>{p.precio_libre ? "—" : "falta"}</span>}</td>
                     <td className="text-right font-semibold tabular-nums">{p.precio_libre ? <span className="text-xs font-medium text-tenue">libre</span> : sinPrecio(p) ? <Insignia color="ambar">sin precio</Insignia> : euros(p.precio_venta)}</td>
                     <td className="text-right">{p.coste_medio && !p.precio_libre && !sinPrecio(p) ? <Insignia color={margen >= 25 ? "verde" : margen >= 10 ? "ambar" : "rojo"}>{pct(margen)}</Insignia> : <span className="text-tenue">—</span>}</td>
                     <td className="hidden text-right tabular-nums sm:table-cell">{p.control_stock ? cantidad(p.stock_actual, p.unidad_medida) : <span className="text-tenue">—</span>}</td>
@@ -277,9 +284,8 @@ function Productos() {
       <Modal abierto={!!form} alCerrar={() => setForm(null)} titulo={form?.id == null ? "Nuevo producto" : `Editar ${form.actual?.nombre}`} ancho="max-w-2xl">
         {form && (() => {
           const d = form.datos;
-          const base = d.precio_venta != null && ivaElegido != null ? d.precio_venta / (1 + ivaElegido / 100) : null;
-          const beneficio = base != null && d.coste != null ? base - d.coste : null;
-          const sugerido = d.coste && ivaElegido != null ? Math.ceil((d.coste * (1 + ivaElegido / 100)) / (1 - MARGEN_OBJETIVO / 100) * 20) / 20 : null;
+          const beneficio = d.precio_venta != null && d.coste != null ? d.precio_venta - d.coste : null;
+          const sugerido = d.coste ? Math.ceil(d.coste / (1 - MARGEN_OBJETIVO / 100) * 20) / 20 : null;
           return (
           <form onSubmit={guardar} className="grid max-h-[72vh] gap-4 overflow-y-auto px-0.5 sm:grid-cols-2">
             <Seccion>Producto</Seccion>
@@ -317,12 +323,6 @@ function Productos() {
               <label className="etiqueta" htmlFor="p-prov">Proveedor habitual</label>
               <ElegirProveedor id="p-prov" valor={d.proveedor_id || ""} alCambiar={(v) => campo("proveedor_id", v || 0)} />
             </div>
-            <div>
-              <label className="etiqueta" htmlFor="p-iva">IVA</label>
-              <select id="p-iva" className="campo" required value={d.iva_id || ""} onChange={(e) => campo("iva_id", Number(e.target.value))}>
-                <option value="">Elige…</option>{ivas.datos?.map((c) => <option key={c.id} value={c.id}>{c.nombre} ({c.porcentaje} %)</option>)}
-              </select>
-            </div>
 
             <Seccion>En el mostrador</Seccion>
             <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-borde p-3 text-sm sm:col-span-2">
@@ -340,28 +340,26 @@ function Productos() {
 
             <Seccion>Precios</Seccion>
             <div>
-              <label className="etiqueta" htmlFor="p-coste">{form.id == null ? "Precio de compra" : "Coste medio"} sin IVA (€{porKg})</label>
-              <CampoNumero id="p-coste" decimales={4} placeholder="El de la factura del proveedor" valor={d.coste} alCambiar={(n) => campo("coste", n)} />
+              <label className="etiqueta" htmlFor="p-coste">{form.id == null ? "Precio de compra" : "Coste medio"}, IVA incluido (€{porKg})</label>
+              <CampoNumero id="p-coste" decimales={4} placeholder="Opcional: lo que te cuesta" valor={d.coste} alCambiar={(n) => campo("coste", n)} />
               <p className="mt-1 text-xs text-tenue">
-                {form.id == null ? "Opcional, pero sin él no se puede calcular el beneficio." : "Se recalcula solo con cada compra. Cámbialo solo para corregirlo."}
-                {d.coste != null && ivaElegido != null && <> Con IVA: {euros(d.coste * (1 + ivaElegido / 100))}.</>}
+                {form.id == null ? "Si aún no lo sabes, déjalo vacío: te avisará de que falta." : "Se recalcula solo con cada compra. Cámbialo solo para corregirlo."}
               </p>
             </div>
             <div>
-              <label className="etiqueta" htmlFor="p-pvp">Precio de venta, con IVA (€{porKg})</label>
-              <CampoNumero id="p-pvp" required={!d.precio_libre} disabled={d.precio_libre} placeholder={d.precio_libre ? "Se escribe al vender" : "Lo que paga el cliente"} valor={d.precio_venta} alCambiar={(n) => campo("precio_venta", n)} />
+              <label className="etiqueta" htmlFor="p-pvp">Precio de venta (€{porKg})</label>
+              <CampoNumero id="p-pvp" disabled={d.precio_libre} placeholder={d.precio_libre ? "Se escribe al vender" : "Opcional: lo que paga el cliente"} valor={d.precio_venta} alCambiar={(n) => campo("precio_venta", n)} />
               {sugerido != null && d.precio_venta == null && (
                 <button type="button" className="mt-1 text-xs font-medium text-marca-fuerte hover:underline" onClick={() => campo("precio_venta", sugerido)}>
                   Para ganar un {MARGEN_OBJETIVO} %: {euros(sugerido)} (usar)
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-3 gap-2 rounded-xl bg-superficie-2 p-3 text-center text-sm sm:col-span-2">
-              <Dato titulo="Venta sin IVA" valor={base != null ? euros(base) : "—"} />
+            <div className="grid grid-cols-2 gap-2 rounded-xl bg-superficie-2 p-3 text-center text-sm sm:col-span-2">
               <Dato titulo={`Beneficio por ${d.unidad_medida === "kg" ? "kg" : "unidad"}`} valor={beneficio != null ? euros(beneficio) : "—"}
                 color={beneficio == null ? "" : beneficio < 0 ? "text-rose-600 dark:text-rose-400" : "text-marca-fuerte"} />
-              <Dato titulo="Margen" valor={beneficio != null && base ? pct((beneficio / base) * 100) : "—"} />
-              {(d.coste == null || ivaElegido == null) && <p className="col-span-3 text-xs text-tenue">Pon el IVA, el precio de compra y el de venta para ver lo que ganas.</p>}
+              <Dato titulo="Margen" valor={beneficio != null && d.precio_venta ? pct((beneficio / d.precio_venta) * 100) : "—"} />
+              {(d.coste == null || d.precio_venta == null) && <p className="col-span-2 text-xs text-tenue">Pon el precio de compra y el de venta para ver lo que ganas.</p>}
             </div>
 
             {d.control_stock && <Seccion>Stock</Seccion>}
@@ -583,17 +581,17 @@ function FilaPrecio({ p, alEditar }: { p: ProductoAdmin; alEditar: (p: ProductoA
   const [pvp, setPvp] = useState<number | null>(null);
   const [coste, setCoste] = useState<number | null>(p.coste_medio ? redondear(p.coste_medio) : null);
   const [enviando, setEnviando] = useState(false);
-  const margen = pvp && coste ? margenDe(pvp, p.iva, coste) : null;
+  const margen = pvp && coste ? margenDe(pvp, coste) : null;
   const porKg = p.unidad_medida === "kg" ? "/kg" : "";
 
   async function guardar(e: FormEvent) {
     e.preventDefault();
-    if (!pvp) return;
+    if (!pvp && !coste) return;
     setEnviando(true);
     try {
       const cambioCoste = coste != null && coste !== redondear(p.coste_medio) ? { coste_medio: coste } : {};
-      await patch(`/productos/${p.id}`, { precio_venta: pvp, ...cambioCoste });
-      avisar("ok", `${p.nombre}: ${euros(pvp)}`);
+      await patch(`/productos/${p.id}`, { ...(pvp ? { precio_venta: pvp } : {}), ...cambioCoste });
+      avisar("ok", `${p.nombre} guardado`);
       emitirCambio();
     } catch (err) { avisar("error", (err as Error).message); setEnviando(false); }
   }
@@ -602,19 +600,19 @@ function FilaPrecio({ p, alEditar }: { p: ProductoAdmin; alEditar: (p: ProductoA
     <form onSubmit={guardar} className="tarjeta grid grid-cols-2 items-end gap-2 p-3 sm:grid-cols-[1fr_8rem_8rem_auto] sm:gap-3">
       <button type="button" className="col-span-2 min-w-0 text-left sm:col-span-1 sm:self-center" onClick={() => alEditar(p)} title="Abrir la ficha completa">
         <p className="truncate font-medium">{p.nombre}</p>
-        <p className="truncate text-xs text-tenue">{p.categoria} · IVA {p.iva} %{p.codigo_barras ? ` · ${p.codigo_barras}` : ""}</p>
+        <p className="truncate text-xs text-tenue">{p.categoria}{p.codigo_barras ? ` · ${p.codigo_barras}` : ""}</p>
       </button>
       <div>
-        <label className="etiqueta" htmlFor={`pv-${p.id}`}>Venta, con IVA (€{porKg})</label>
+        <label className="etiqueta" htmlFor={`pv-${p.id}`}>Venta (€{porKg})</label>
         <CampoNumero id={`pv-${p.id}`} placeholder="0,00" valor={pvp} alCambiar={setPvp} />
       </div>
       <div>
-        <label className="etiqueta" htmlFor={`pc-${p.id}`}>Compra, sin IVA (€{porKg})</label>
-        <CampoNumero id={`pc-${p.id}`} decimales={4} placeholder="Opcional" valor={coste} alCambiar={setCoste} />
+        <label className="etiqueta" htmlFor={`pc-${p.id}`}>Compra, IVA incl. (€{porKg})</label>
+        <CampoNumero id={`pc-${p.id}`} decimales={4} placeholder="Falta" valor={coste} alCambiar={setCoste} />
       </div>
       <div className="col-span-2 flex items-center justify-between gap-3 sm:col-span-1 sm:flex-col sm:items-end sm:gap-1">
         <span className={`text-xs ${margen != null && margen < 0 ? "text-red-600 dark:text-red-400" : "text-tenue"}`}>{margen != null ? `Margen ${pct(margen)}` : ""}</span>
-        <button className="boton px-4" disabled={!pvp || enviando}>Guardar</button>
+        <button className="boton px-4" disabled={(!pvp && !coste) || enviando}>Guardar</button>
       </div>
     </form>
   );

@@ -40,7 +40,7 @@ const ESQUEMA = {
           unidades_por_bulto: { type: "NUMBER", description: "Unidades que trae cada caja o pack, si se factura por cajas; si no, 1" },
           cantidad: { type: "NUMBER", description: "Unidades sueltas totales (cajas × unidades por caja), o kilos si se vende a granel" },
           por_kg: { type: "BOOLEAN", description: "true si el artículo se factura por peso" },
-          coste_unitario: { type: "NUMBER", description: "Precio de UNA unidad suelta (o de un kg), SIN IVA y con los descuentos de la línea aplicados" },
+          coste_unitario: { type: "NUMBER", description: "Lo que cuesta de verdad UNA unidad suelta (o un kg): CON el IVA y el recargo de equivalencia incluidos y con los descuentos de la línea aplicados" },
           iva: { type: "NUMBER", description: "Porcentaje de IVA de la línea (4, 10, 21, 0…), sin el recargo de equivalencia", nullable: true },
           importe: { type: "NUMBER", description: "Importe total de la línea sin IVA", nullable: true },
         },
@@ -55,7 +55,7 @@ const INSTRUCCIONES = `Eres el lector de facturas de una tienda de alimentación
 Extrae los datos de la factura o albarán de la imagen. Reglas:
 - Una línea por artículo, en el orden de la factura. No inventes líneas ni datos que no se lean.
 - Si un artículo se factura por cajas o packs, cantidad = número de unidades sueltas que entran en la tienda y coste_unitario = precio de una unidad suelta.
-- coste_unitario siempre SIN IVA y con el descuento de esa línea ya aplicado. Si la factura solo da precios con IVA, quítaselo.
+- coste_unitario siempre CON IVA (y con el recargo de equivalencia si la factura lo lleva) y con el descuento de esa línea ya aplicado: lo que de verdad se paga por una unidad. Si la factura da los precios sin IVA, súmale el IVA (y el recargo) de esa línea.
 - Los números en formato decimal con punto (1.25), sin símbolo de euro.
 - Portes, envases, recargo de equivalencia y descuentos generales van con es_producto = false.`;
 

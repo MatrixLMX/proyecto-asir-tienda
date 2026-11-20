@@ -405,18 +405,18 @@ describe("catálogo", () => {
 });
 
 describe("informes", () => {
-  it("calcula el beneficio real sin IVA, con mermas y al céntimo", async () => {
-    // 10 aguas a 1,20 con 10 % de IVA: 12,00 €, base 10,91, coste 5,00, beneficio 5,91
+  it("calcula el beneficio real (cobrado menos coste, todo con IVA), con mermas y al céntimo", async () => {
+    // 10 aguas a 1,20 con 10 % de IVA: 12,00 €, base 10,91, coste (con IVA) 5,00, beneficio 7,00
     await vender({ lineas: [{ producto_id: 1, cantidad: 10 }] }, admin);
     await admin("/mermas", "POST", { producto_id: 1, cantidad: 2, motivo: "roto" });
 
     const [mes] = await json<Record<string, any>[]>(admin("/informes/mensual"));
-    expect(mes).toMatchObject({ facturacion: 12, base_imponible: 10.91, coste: 5, beneficio_bruto: 5.91, perdidas_mermas: 1, beneficio_neto: 4.91, margen_pct: 45, estimacion_15_pct: 1.8 });
+    expect(mes).toMatchObject({ facturacion: 12, base_imponible: 10.91, coste: 5, beneficio_bruto: 7, perdidas_mermas: 1, beneficio_neto: 6, margen_pct: 50, estimacion_15_pct: 1.8 });
 
     const [prod] = await json<Record<string, any>[]>(admin("/informes/productos"));
-    expect(prod).toMatchObject({ producto_id: 1, producto: "Agua", categoria: "Bebidas", unidades_vendidas: 10, facturacion: 12, beneficio: 5.91, margen_pct: 54.2 });
+    expect(prod).toMatchObject({ producto_id: 1, producto: "Agua", categoria: "Bebidas", unidades_vendidas: 10, facturacion: 12, beneficio: 7, margen_pct: 58.3 });
     const [cat] = await json<Record<string, any>[]>(admin("/informes/categorias"));
-    expect(cat).toMatchObject({ categoria: "Bebidas", facturacion: 12, beneficio: 5.91 });
+    expect(cat).toMatchObject({ categoria: "Bebidas", facturacion: 12, beneficio: 7 });
 
     const dias = await json<Record<string, any>[]>(admin("/informes/diario"));
     expect(dias).toEqual([expect.objectContaining({ num_ventas: 1, facturacion: 12, ticket_medio: 12 })]);
@@ -457,19 +457,19 @@ describe("estadísticas", () => {
     const e = await json(admin("/estadisticas"));
     expect(e).toMatchObject({ dias: 30, agrupado: "dia" });
     expect(e.actual).toMatchObject({
-      ventas_brutas: 12, devoluciones: 0, ventas_netas: 12, sin_iva: 10.91, iva: 1.09, coste: 5, beneficio_bruto: 5.91,
-      mermas: 1, beneficio: 4.91, margen: 45, tickets: 1, ticket_medio: 12, articulos_ticket: 10,
+      ventas_brutas: 12, devoluciones: 0, ventas_netas: 12, sin_iva: 10.91, iva: 1.09, coste: 5, beneficio_bruto: 7,
+      mermas: 1, beneficio: 6, margen: 50, tickets: 1, ticket_medio: 12, articulos_ticket: 10,
       pagos: { efectivo: 0, tarjeta: 12, bizum: 0, fiado: 0 },
     });
     expect(e.anterior).toMatchObject({ ventas_netas: 6, tickets: 1, mermas: 0 });
     expect(e.cambio).toMatchObject({ ventas_netas: 100, tickets: 0 });
     expect(e.serie).toHaveLength(30);
-    expect(e.serie.at(-1)).toMatchObject({ facturacion: 12, beneficio: 4.91, tickets: 1 });
-    expect(e.productos).toEqual([expect.objectContaining({ producto: "Agua", unidades: 10, facturacion: 12, beneficio: 5.91, margen: 54.2, tickets: 1, sin_coste: false })]);
+    expect(e.serie.at(-1)).toMatchObject({ facturacion: 12, beneficio: 6, tickets: 1 });
+    expect(e.productos).toEqual([expect.objectContaining({ producto: "Agua", unidades: 10, facturacion: 12, beneficio: 7, margen: 58.3, tickets: 1, sin_coste: false })]);
     expect(e.categorias).toEqual([expect.objectContaining({ categoria: "Bebidas", facturacion: 12, peso: 100 })]);
     expect(e.semana.reduce((t: number, d: { tickets: number }) => t + d.tickets, 0)).toBe(1);
     expect(e.mensual).toHaveLength(12);
-    expect(e.mensual.at(-1)).toMatchObject({ beneficio: 4.91 });
+    expect(e.mensual.at(-1)).toMatchObject({ beneficio: 6 });
 
     // Un periodo largo se agrupa por meses
     const año = await json(admin("/estadisticas?desde=2026-01-01&hasta=2026-12-31"));
@@ -660,10 +660,10 @@ describe("asistente: acciones y voz", () => {
     expect(r.acciones).toEqual([
       { tipo: "compra", proveedor_id: expect.any(Number), proveedor: "Coca-Cola", lineas: [
         { producto_id: 1, nombre: "Agua", unidad_medida: "unidad", cantidad: 24, coste_unitario: 0.3, necesita_fecha: false },
-        // Sin precio: el coste medio
-        { producto_id: 2, nombre: "Patatas", unidad_medida: "kg", cantidad: 5, coste_unitario: 1.5, necesita_fecha: false },
+        // Sin precio de compra: se queda vacío (al guardar se usa el coste que ya tenía)
+        { producto_id: 2, nombre: "Patatas", unidad_medida: "kg", cantidad: 5, coste_unitario: null, necesita_fecha: false },
       ] },
-      { tipo: "producto", nombre: "Galletas de chocolate", categoria_id: expect.any(Number), iva_id: expect.any(Number), unidad_medida: "unidad",
+      { tipo: "producto", nombre: "Galletas de chocolate", categoria_id: expect.any(Number), unidad_medida: "unidad",
         precio_venta: 1.8, coste_compra: 0.95, stock_inicial: 12, codigo_barras: null },
       { tipo: "precio", producto_id: 3, nombre: "Yogur", antes: 2.5, precio_venta: 2.75 },
       { tipo: "merma", producto_id: 3, nombre: "Yogur", unidad_medida: "unidad", cantidad: 2, motivo: "roto" },
@@ -678,7 +678,13 @@ describe("asistente: acciones y voz", () => {
     const compra = r.acciones[0];
     expect((await admin("/compras", "POST", { proveedor_id: compra.proveedor_id, lineas: compra.lineas })).status).toBe(200);
     expect(await stock(1)).toBe(antes.stock + 24000);
-    expect((await admin("/productos", "POST", r.acciones[1])).status).toBe(200);
+    expect(await stock(2)).toBe(10000 + 5000);
+    // El coste de las patatas no cambia por una compra sin precio
+    expect(await db.prepare("SELECT coste_medio_dm FROM productos WHERE id = 2").first<number>("coste_medio_dm")).toBe(15000);
+    const nuevo = await json(admin("/productos", "POST", r.acciones[1]));
+    expect(nuevo).toMatchObject({ id: expect.any(Number) });
+    // Sin IVA indicado, el de la categoría (Alimentación: 10 %)
+    expect(await db.prepare("SELECT i.porcentaje_cp FROM productos p JOIN tipos_iva i ON i.id = p.iva_id WHERE p.id = ?").bind(nuevo.id).first<number>("porcentaje_cp")).toBe(1000);
   });
 
   it("no prepara nada con productos que no existen, repetidos o datos que faltan", async () => {

@@ -30,7 +30,7 @@ catalogo.get("/productos", async (c) => {
 });
 
 catalogo.get("/categorias", async (c) =>
-  c.json(ordenar(await filas<{ nombre: string }>(c, "SELECT id, nombre FROM categorias WHERE activa"), "nombre")));
+  c.json(ordenar(await filas<{ nombre: string }>(c, "SELECT id, nombre, iva_id FROM categorias WHERE activa"), "nombre")));
 
 catalogo.get("/alertas/stock", (c) => lista(c, "SELECT * FROM v_alertas_stock ORDER BY stock_actual"));
 catalogo.get("/alertas/caducidades", (c) => lista(c, "SELECT * FROM v_caducidades ORDER BY fecha_caducidad"));
@@ -113,8 +113,10 @@ catalogo.post("/compras", soloAdmin, async (c) => {
   const lineas = d.lineas.map((l: Datos) => ({
     producto_id: entero(l?.producto_id, "el producto"),
     cantidad: milli(l?.cantidad, "la cantidad"),
-    coste: dm(l?.coste_unitario, "el coste"),
     caducidad: fechaONula(l?.fecha_caducidad, "la fecha de caducidad"),
+    // Sin precio (aún no ha llegado la factura): se usa el coste que ya tenía,
+    // para no estropear el coste medio
+    coste: l?.coste_unitario === null || l?.coste_unitario === undefined || l?.coste_unitario === "" ? null : dm(l.coste_unitario, "el coste"),
     // Descripción en la factura leída de una foto: se aprende para la próxima
     alias: claveAlias(texto(l?.texto_factura, "la descripción", 200) ?? ""),
   }));
@@ -122,8 +124,8 @@ catalogo.post("/compras", soloAdmin, async (c) => {
 
   // Un INSERT ... SELECT de un producto inexistente no daría error: no insertaría nada
   const ids = [...new Set(lineas.map((l) => l.producto_id))];
-  const productos = await filas<{ id: number; nombre: string; controla_caducidad: number; vida_util_dias: number | null }>(
-    c, `SELECT id, nombre, controla_caducidad, vida_util_dias FROM productos WHERE id IN (${ids.map(() => "?").join(",")})`, ...ids);
+  const productos = await filas<{ id: number; nombre: string; controla_caducidad: number; vida_util_dias: number | null; coste_medio_dm: number }>(
+    c, `SELECT id, nombre, controla_caducidad, vida_util_dias, coste_medio_dm FROM productos WHERE id IN (${ids.map(() => "?").join(",")})`, ...ids);
   if (productos.length !== ids.length) throw fallo(400, "Hace referencia a algo que no existe o está en uso.");
   for (const l of lineas) {
     const p = productos.find((x) => x.id === l.producto_id)!;
@@ -135,7 +137,7 @@ catalogo.post("/compras", soloAdmin, async (c) => {
   const proveedor = enteroONulo(d.proveedor_id, "el proveedor");
   const r = await escribir(c, [
     pasoCompra(c, proveedor, texto(d.numero_factura, "la factura", 40), texto(d.notas, "las notas", 255)),
-    ...lineas.map((l) => pasoLineaCompra(c, "?", l.cantidad, l.coste, l.caducidad, l.producto_id)),
+    ...lineas.map((l) => pasoLineaCompra(c, "?", l.cantidad, l.coste ?? productos.find((x) => x.id === l.producto_id)!.coste_medio_dm, l.caducidad, l.producto_id)),
     ...lineas.filter((l) => l.alias).map((l) => c.env.DB.prepare(
       `INSERT INTO alias_factura (proveedor_id, texto, producto_id) VALUES (?, ?, ?)
        ON CONFLICT (proveedor_id, texto) DO UPDATE SET producto_id = excluded.producto_id`,
@@ -208,6 +210,13 @@ catalogo.post("/productos", soloAdmin, async (c) => {
   // Sin precio se puede dar de alta (alta rápida escaneando), pero no vender
 
   const db = c.env.DB;
+  // El IVA solo sirve para el ticket de venta: si no se indica, el de la categoría
+  const categoria = entero(p.categoria_id, "la categoría");
+  const iva = p.iva_id === undefined || p.iva_id === null || p.iva_id === 0 || p.iva_id === ""
+    ? (await db.prepare(`SELECT COALESCE(c.iva_id, (SELECT id FROM tipos_iva WHERE porcentaje_cp = 1000), (SELECT MIN(id) FROM tipos_iva)) AS iva
+                           FROM categorias c WHERE c.id = ?`).bind(categoria).first<number>("iva")) ?? null
+    : entero(p.iva_id, "el IVA");
+  if (!iva) throw fallo(400, "Revisa la categoría");
   // Si se indica el stock que ya hay, se registra como una compra de "stock
   // inicial" (así entran el coste y, si caduca, el lote), en la misma transacción.
   const r = await escribir(c, [
@@ -217,8 +226,8 @@ catalogo.post("/productos", soloAdmin, async (c) => {
                               control_stock, precio_libre, acceso_rapido)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
-      nombre, texto(p.codigo_barras, "el código de barras", 20), entero(p.categoria_id, "la categoría"), proveedor,
-      entero(p.iva_id, "el IVA"), unidad, cent(p.precio_venta ?? 0, "el precio de venta"), controlStock ? milli(p.stock_minimo ?? 0, "el stock mínimo") : 0,
+      nombre, texto(p.codigo_barras, "el código de barras", 20), categoria, proveedor,
+      iva, unidad, cent(p.precio_venta ?? 0, "el precio de venta"), controlStock ? milli(p.stock_minimo ?? 0, "el stock mínimo") : 0,
       controlStock ? booleano(p.controla_caducidad ?? false, "la caducidad") : 0, controlStock ? enteroONulo(p.vida_util_dias, "la vida útil") || null : null,
       entero(p.dias_aviso_caducidad ?? 5, "los días de aviso", 255), coste,
       controlStock, precioLibre, booleano(p.acceso_rapido ?? false, "el acceso rápido"),

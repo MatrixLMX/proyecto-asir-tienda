@@ -35,8 +35,8 @@ export default function Stock({ usuario, ir }: PropsPagina) {
       });
   }, [datos, q, filtro, orden]);
 
-  const Columna = ({ campo, children, derecha }: { campo: Orden; children: string; derecha?: boolean }) => (
-    <th className={derecha ? "text-right" : ""}>
+  const Columna = ({ campo, children, derecha, clase = "" }: { campo: Orden; children: string; derecha?: boolean; clase?: string }) => (
+    <th className={`${derecha ? "text-right" : ""} ${clase}`}>
       <button
         onClick={() => setOrden((o) => ({ campo, asc: o.campo === campo ? !o.asc : true }))}
         className={`inline-flex items-center gap-1 uppercase hover:text-texto ${orden.campo === campo ? "text-texto" : ""}`}
@@ -76,7 +76,7 @@ export default function Stock({ usuario, ir }: PropsPagina) {
             <thead>
               <tr>
                 <Columna campo="producto">Producto</Columna>
-                <Columna campo="categoria">Categoría</Columna>
+                <Columna campo="categoria" clase="hidden sm:table-cell">Categoría</Columna>
                 <Columna campo="precio_venta" derecha>PVP</Columna>
                 <Columna campo="stock_actual" derecha>Stock</Columna>
                 <th className="hidden sm:table-cell">Nivel</th>
@@ -89,8 +89,8 @@ export default function Stock({ usuario, ir }: PropsPagina) {
                 const color = p.estado === "OK" ? "verde" : p.estado === "BAJO" ? "ambar" : "rojo";
                 return (
                   <tr key={p.id}>
-                    <td className="font-medium">{p.producto}</td>
-                    <td className="text-suave">{p.categoria}</td>
+                    <td className="font-medium">{p.producto}<span className="block text-xs font-normal text-tenue sm:hidden">{p.categoria}</span></td>
+                    <td className="hidden text-suave sm:table-cell">{p.categoria}</td>
                     <td className="text-right tabular-nums">{euros(p.precio_venta)}</td>
                     <td className="text-right font-semibold tabular-nums">{p.control_stock ? cantidad(p.stock_actual, p.unidad_medida) : <span className="font-normal text-tenue">—</span>}</td>
                     <td className="hidden w-48 sm:table-cell">

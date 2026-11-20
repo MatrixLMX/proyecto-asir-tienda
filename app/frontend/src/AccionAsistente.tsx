@@ -9,8 +9,8 @@ import { CampoNumero, emitirCambio, useDatos } from "./ui";
 
 export type AccionAsistente =
   | { tipo: "compra"; proveedor_id: number | null; proveedor: string | null;
-      lineas: { producto_id: number; nombre: string; unidad_medida: string; cantidad: number; coste_unitario: number; necesita_fecha: boolean; fecha_caducidad?: string }[] }
-  | { tipo: "producto"; nombre: string; categoria_id: number | null; iva_id: number | null; unidad_medida: "unidad" | "kg";
+      lineas: { producto_id: number; nombre: string; unidad_medida: string; cantidad: number; coste_unitario: number | null; necesita_fecha: boolean; fecha_caducidad?: string }[] }
+  | { tipo: "producto"; nombre: string; categoria_id: number | null; unidad_medida: "unidad" | "kg";
       precio_venta: number | null; coste_compra: number | null; stock_inicial: number; codigo_barras: string | null }
   | { tipo: "precio"; producto_id: number; nombre: string; antes: number; precio_venta: number }
   | { tipo: "merma"; producto_id: number; nombre: string; unidad_medida: string; cantidad: number; motivo: string }
@@ -36,7 +36,7 @@ export default function TarjetaAccion({ inicial, id }: { inicial: AccionAsistent
       case "compra": return !a.lineas.length ? "No queda ningún producto"
         : a.lineas.some((l) => !(l.cantidad > 0)) ? "Revisa las cantidades"
         : a.lineas.some((l) => l.necesita_fecha && !l.fecha_caducidad) ? "Pon la fecha de caducidad" : "";
-      case "producto": return !a.nombre.trim() ? "Pon el nombre" : !a.categoria_id ? "Elige la categoría" : !a.iva_id ? "Elige el IVA" : "";
+      case "producto": return !a.nombre.trim() ? "Pon el nombre" : !a.categoria_id ? "Elige la categoría" : "";
       case "precio": return a.precio_venta > 0 ? "" : "Pon el precio";
       case "merma": return a.cantidad > 0 ? "" : "Pon la cantidad";
       case "nota": return a.texto.trim() ? "" : "Escribe la nota";
@@ -56,7 +56,7 @@ export default function TarjetaAccion({ inicial, id }: { inicial: AccionAsistent
           break;
         case "producto":
           await post("/productos", {
-            nombre: a.nombre.trim(), categoria_id: a.categoria_id, iva_id: a.iva_id, unidad_medida: a.unidad_medida, codigo_barras: a.codigo_barras,
+            nombre: a.nombre.trim(), categoria_id: a.categoria_id, unidad_medida: a.unidad_medida, codigo_barras: a.codigo_barras,
             precio_venta: a.precio_venta ?? 0, coste_compra: a.coste_compra ?? 0, stock_inicial: a.stock_inicial || 0,
           });
           break;
@@ -149,7 +149,8 @@ function Compra({ a, editar, id }: { a: Extract<AccionAsistente, { tipo: "compra
   const proveedores = useDatos<Opcion[]>("/proveedores");
   const cambiarLinea = (i: number, cambio: Partial<typeof a.lineas[number]>) =>
     editar({ lineas: a.lineas.map((l, j) => (j === i ? { ...l, ...cambio } : l)) });
-  const total = a.lineas.reduce((s, l) => s + l.cantidad * l.coste_unitario, 0);
+  const total = a.lineas.reduce((s, l) => s + l.cantidad * (l.coste_unitario ?? 0), 0);
+  const sinPrecio = a.lineas.some((l) => l.coste_unitario == null);
   return (
     <div className="space-y-2">
       <div>
@@ -174,8 +175,8 @@ function Compra({ a, editar, id }: { a: Extract<AccionAsistente, { tipo: "compra
                 <CampoNumero id={`${id}-c${i}`} decimales={l.unidad_medida === "kg" ? 3 : 0} valor={l.cantidad} alCambiar={(n) => cambiarLinea(i, { cantidad: n ?? 0 })} />
               </div>
               <div>
-                <label className="etiqueta" htmlFor={`${id}-k${i}`}>Coste sin IVA</label>
-                <CampoNumero id={`${id}-k${i}`} decimales={4} valor={l.coste_unitario} alCambiar={(n) => cambiarLinea(i, { coste_unitario: n ?? 0 })} />
+                <label className="etiqueta" htmlFor={`${id}-k${i}`}>Precio, IVA incl.</label>
+                <CampoNumero id={`${id}-k${i}`} decimales={4} placeholder="Luego" valor={l.coste_unitario} alCambiar={(n) => cambiarLinea(i, { coste_unitario: n })} />
               </div>
               {l.necesita_fecha && (
                 <div className="col-span-2">
@@ -187,14 +188,13 @@ function Compra({ a, editar, id }: { a: Extract<AccionAsistente, { tipo: "compra
           </li>
         ))}
       </ul>
-      <p className="text-right text-xs text-tenue">Total sin IVA <b className="text-suave">{euros(total)}</b></p>
+      <p className="text-right text-xs text-tenue">{sinPrecio ? "Sin precio de compra: lo puedes poner luego. " : ""}Total <b className="text-suave">{euros(total)}</b></p>
     </div>
   );
 }
 
 function Producto({ a, editar, id }: { a: Extract<AccionAsistente, { tipo: "producto" }>; editar: Editar; id: string }) {
   const categorias = useDatos<Opcion[]>("/categorias");
-  const ivas = useDatos<Opcion[]>("/tipos-iva");
   const kg = a.unidad_medida === "kg";
   return (
     <div className="grid grid-cols-2 gap-2">
@@ -202,24 +202,18 @@ function Producto({ a, editar, id }: { a: Extract<AccionAsistente, { tipo: "prod
         <label className="etiqueta" htmlFor={`${id}-n`}>Nombre</label>
         <input id={`${id}-n`} className="campo" maxLength={100} value={a.nombre} onChange={(e) => editar({ nombre: e.target.value })} />
       </div>
-      <div>
+      <div className="col-span-2">
         <label className="etiqueta" htmlFor={`${id}-cat`}>Categoría</label>
         <select id={`${id}-cat`} className="campo" value={a.categoria_id ?? ""} onChange={(e) => editar({ categoria_id: e.target.value ? Number(e.target.value) : null })}>
           <option value="">Elige…</option>{categorias.datos?.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
         </select>
       </div>
       <div>
-        <label className="etiqueta" htmlFor={`${id}-iva`}>IVA</label>
-        <select id={`${id}-iva`} className="campo" value={a.iva_id ?? ""} onChange={(e) => editar({ iva_id: e.target.value ? Number(e.target.value) : null })}>
-          <option value="">Elige…</option>{ivas.datos?.map((c) => <option key={c.id} value={c.id}>{c.porcentaje} %</option>)}
-        </select>
-      </div>
-      <div>
-        <label className="etiqueta" htmlFor={`${id}-pvp`}>Venta con IVA</label>
+        <label className="etiqueta" htmlFor={`${id}-pvp`}>Venta</label>
         <CampoNumero id={`${id}-pvp`} placeholder="Luego" valor={a.precio_venta} alCambiar={(n) => editar({ precio_venta: n })} />
       </div>
       <div>
-        <label className="etiqueta" htmlFor={`${id}-k`}>Compra sin IVA</label>
+        <label className="etiqueta" htmlFor={`${id}-k`}>Compra, IVA incl.</label>
         <CampoNumero id={`${id}-k`} decimales={4} placeholder="Luego" valor={a.coste_compra} alCambiar={(n) => editar({ coste_compra: n })} />
       </div>
       <div>

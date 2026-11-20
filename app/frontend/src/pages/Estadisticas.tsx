@@ -276,8 +276,8 @@ function VistaDinero({ d: datos }: { d: Estadisticas | null }) {
         {d ? (
           <>
             <Kpi titulo="Ventas netas" valor={euros(d.actual.ventas_netas)} tendencia={d.cambio.ventas_netas} detalle="IVA incluido, sin devoluciones" icono={<Euro className="size-5" />} color="azul" />
-            <Kpi titulo="Beneficio real" valor={euros(d.actual.beneficio)} tendencia={d.cambio.beneficio} detalle="sin IVA, coste ni mermas" icono={<PiggyBank className="size-5" />} />
-            <Kpi titulo="Margen" valor={pct(d.actual.margen)} detalle={d.cambio.margen == null ? "sobre la venta sin IVA" : `${d.cambio.margen >= 0 ? "+" : ""}${num(d.cambio.margen, 1)} puntos vs. antes`} icono={<Banknote className="size-5" />} />
+            <Kpi titulo="Beneficio real" valor={euros(d.actual.beneficio)} tendencia={d.cambio.beneficio} detalle="ventas menos coste y mermas" icono={<PiggyBank className="size-5" />} />
+            <Kpi titulo="Margen" valor={pct(d.actual.margen)} detalle={d.cambio.margen == null ? "sobre lo vendido" : `${d.cambio.margen >= 0 ? "+" : ""}${num(d.cambio.margen, 1)} puntos vs. antes`} icono={<Banknote className="size-5" />} />
             <Kpi titulo="Fiado sin cobrar" valor={euros(d.fiado_pendiente)} detalle="lo que deben hoy los clientes" icono={<Receipt className="size-5" />} color="ambar" />
           </>
         ) : Array.from({ length: 4 }, (_, i) => <Esqueleto key={i} className="h-[132px]" />)}
@@ -374,7 +374,6 @@ function Cuenta({ r, cambio }: { r: Resumen; cambio: Record<string, number | nul
     { nombre: "Ventas brutas", valor: r.ventas_brutas, nota: tickets(r.tickets), clave: "ventas_brutas" },
     { nombre: "Devoluciones", valor: r.devoluciones, tipo: "resta", nota: r.num_devoluciones ? `${r.num_devoluciones}` : undefined },
     { nombre: "Ventas netas", valor: r.ventas_netas, tipo: "total", clave: "ventas_netas" },
-    { nombre: "IVA cobrado", valor: r.iva, tipo: "resta", nota: "para Hacienda" },
     { nombre: "Coste de lo vendido", valor: r.coste, tipo: "resta", nota: "precio de compra" },
     { nombre: "Mermas", valor: r.mermas, tipo: "resta", nota: "tirado o roto" },
     { nombre: "Beneficio real", valor: r.beneficio, tipo: "total", clave: "beneficio" },
@@ -396,7 +395,7 @@ function Cuenta({ r, cambio }: { r: Resumen; cambio: Record<string, number | nul
           </div>
         );
       })}
-      <p className="mt-2 text-xs text-tenue">Margen real: <b className="text-texto">{pct(r.margen)}</b> sobre la venta sin IVA.</p>
+      <p className="mt-2 text-xs text-tenue">Margen real: <b className="text-texto">{pct(r.margen)}</b> sobre lo vendido. Compras y ventas, con IVA incluido.</p>
     </dl>
   );
 }
@@ -454,8 +453,8 @@ type Orden = "unidades" | "facturacion" | "beneficio" | "margen" | "menos";
 const ORDENES: { id: Orden; nombre: string; ayuda: string }[] = [
   { id: "unidades", nombre: "Más vendidos", ayuda: "Por unidades (o kilos) vendidas." },
   { id: "facturacion", nombre: "Más ventas", ayuda: "Por dinero cobrado, IVA incluido." },
-  { id: "beneficio", nombre: "Más beneficio", ayuda: "Lo que de verdad dejan: precio sin IVA menos coste." },
-  { id: "margen", nombre: "Más rentables", ayuda: "Por margen: de cada euro sin IVA, cuánto es beneficio. Solo los que tienen coste y se han vendido en 3 tickets o más." },
+  { id: "beneficio", nombre: "Más beneficio", ayuda: "Lo que de verdad dejan: lo cobrado menos lo que costaron." },
+  { id: "margen", nombre: "Más rentables", ayuda: "Por margen: de cada euro cobrado, cuánto es beneficio. Solo los que tienen coste y se han vendido en 3 tickets o más." },
   { id: "menos", nombre: "Menos vendidos", ayuda: "Los que se han vendido algo, pero poco. Los que no se venden nada están en Género parado." },
 ];
 

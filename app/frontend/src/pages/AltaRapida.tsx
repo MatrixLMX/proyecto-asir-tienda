@@ -11,14 +11,14 @@ interface InfoCodigo {
   externo: { nombre: string; marca: string; cantidad: string } | null;
 }
 
-// Se recuerda la última categoría y el IVA que se usó con cada categoría:
-// al ir estantería por estantería, casi siempre se repiten
+// Se recuerda la última categoría: al ir estantería por estantería, casi
+// siempre se repite. El IVA (solo para el ticket) lo pone la categoría.
 const CLAVE = "tienda_alta_rapida";
-const leer = (): { categoria: number; ivas: Record<number, number> } => {
-  try { return { categoria: 0, ivas: {}, ...JSON.parse(localStorage.getItem(CLAVE) ?? "{}") }; } catch { return { categoria: 0, ivas: {} }; }
+const leer = (): { categoria: number } => {
+  try { return { categoria: 0, ...JSON.parse(localStorage.getItem(CLAVE) ?? "{}") }; } catch { return { categoria: 0 }; }
 };
-const guardarPreferencia = (categoria: number, iva: number) => {
-  try { const p = leer(); localStorage.setItem(CLAVE, JSON.stringify({ categoria, ivas: { ...p.ivas, [categoria]: iva } })); } catch { /* sin almacenamiento */ }
+const guardarPreferencia = (categoria: number) => {
+  try { localStorage.setItem(CLAVE, JSON.stringify({ categoria })); } catch { /* sin almacenamiento */ }
 };
 
 const nombreSugerido = (r: InfoCodigo) => {
@@ -35,12 +35,10 @@ const vacio = () => ({ codigo: "", nombre: "", stock: null as number | null, cad
  *  Solo lo imprescindible; el precio se pone después (quedan como "sin precio"). */
 export default function AltaRapida({ abierto, alCerrar }: { abierto: boolean; alCerrar: () => void }) {
   const categorias = useDatos<Opcion[]>("/categorias");
-  const ivas = useDatos<Opcion[]>("/tipos-iva");
   const avisar = useAviso();
   const [camara, setCamara] = useState(false);
   const [d, setD] = useState(vacio);
   const [categoria, setCategoria] = useState(() => leer().categoria);
-  const [iva, setIva] = useState(0);
   const [aviso, setAviso] = useState<string | null>(null);
   const [buscando, setBuscando] = useState(false);
   const [hechos, setHechos] = useState<string[]>([]);
@@ -49,8 +47,6 @@ export default function AltaRapida({ abierto, alCerrar }: { abierto: boolean; al
 
   // Al abrir, directamente a la cámara
   useEffect(() => { if (abierto) { setD(vacio()); setAviso(null); setHechos([]); setCamara(true); } }, [abierto]);
-  // El IVA que se usó la última vez con esta categoría
-  useEffect(() => { const i = leer().ivas[categoria]; if (i) setIva(i); }, [categoria]);
 
   async function leido(codigo: string) {
     const c = codigo.trim();
@@ -73,15 +69,15 @@ export default function AltaRapida({ abierto, alCerrar }: { abierto: boolean; al
 
   async function guardar(e: FormEvent, otro: boolean) {
     e.preventDefault();
-    if (!d.nombre.trim() || !categoria || !iva) return;
+    if (!d.nombre.trim() || !categoria) return;
     setEnviando(true);
     try {
       await post("/productos", {
-        nombre: d.nombre.trim(), codigo_barras: d.codigo || null, categoria_id: categoria, iva_id: iva, unidad_medida: "unidad",
+        nombre: d.nombre.trim(), codigo_barras: d.codigo || null, categoria_id: categoria, unidad_medida: "unidad",
         precio_venta: d.pvp ?? 0, coste_compra: d.coste ?? 0,
         stock_inicial: d.stock ?? 0, controla_caducidad: !!d.caducidad, fecha_caducidad: d.stock && d.caducidad ? d.caducidad : null,
       });
-      guardarPreferencia(categoria, iva);
+      guardarPreferencia(categoria);
       setHechos((h) => [d.nombre.trim(), ...h]);
       emitirCambio();
       setD(vacio()); setAviso(null);
@@ -89,11 +85,10 @@ export default function AltaRapida({ abierto, alCerrar }: { abierto: boolean; al
     } catch (err) { avisar("error", (err as Error).message); } finally { setEnviando(false); }
   }
 
-  const pctIva = ivas.datos?.find((x) => x.id === iva)?.porcentaje;
-  const sinIva = d.pvp && pctIva != null ? d.pvp / (1 + pctIva / 100) : null;
-  const margen = sinIva && d.coste ? Math.round(((sinIva - d.coste) / sinIva) * 100) : null;
+  // Los dos precios llevan el IVA incluido
+  const margen = d.pvp && d.coste ? Math.round(((d.pvp - d.coste) / d.pvp) * 100) : null;
 
-  const listo = !!d.nombre.trim() && !!categoria && !!iva && !aviso?.startsWith("Ya está");
+  const listo = !!d.nombre.trim() && !!categoria && !aviso?.startsWith("Ya está");
 
   return (
     <Modal abierto={abierto} alCerrar={alCerrar} titulo="Alta rápida escaneando">
@@ -118,25 +113,19 @@ export default function AltaRapida({ abierto, alCerrar }: { abierto: boolean; al
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <div>
+          <div className="col-span-2">
             <label className="etiqueta" htmlFor="ar-cat">Categoría</label>
             <select id="ar-cat" className="campo" required value={categoria || ""} onChange={(e) => setCategoria(Number(e.target.value))}>
               <option value="">Elige…</option>{categorias.datos?.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
           </div>
           <div>
-            <label className="etiqueta" htmlFor="ar-iva">IVA</label>
-            <select id="ar-iva" className="campo" required value={iva || ""} onChange={(e) => setIva(Number(e.target.value))}>
-              <option value="">Elige…</option>{ivas.datos?.map((c) => <option key={c.id} value={c.id}>{c.porcentaje} %</option>)}
-            </select>
-          </div>
-          <div>
             <label className="etiqueta" htmlFor="ar-pvp">Precio de venta (€)</label>
-            <CampoNumero id="ar-pvp" placeholder="Con IVA" valor={d.pvp} alCambiar={(n) => setD({ ...d, pvp: n })} />
+            <CampoNumero id="ar-pvp" placeholder="Opcional" valor={d.pvp} alCambiar={(n) => setD({ ...d, pvp: n })} />
           </div>
           <div>
             <label className="etiqueta" htmlFor="ar-coste">Precio de compra (€)</label>
-            <CampoNumero id="ar-coste" decimales={4} placeholder="Sin IVA, factura" valor={d.coste} alCambiar={(n) => setD({ ...d, coste: n })} />
+            <CampoNumero id="ar-coste" decimales={4} placeholder="IVA incluido" valor={d.coste} alCambiar={(n) => setD({ ...d, coste: n })} />
           </div>
           {margen != null && (
             <p className={`col-span-2 -mt-1 text-xs ${margen < 0 ? "text-red-600 dark:text-red-400" : "text-tenue"}`}>
@@ -145,7 +134,7 @@ export default function AltaRapida({ abierto, alCerrar }: { abierto: boolean; al
           )}
           <div>
             <label className="etiqueta" htmlFor="ar-stock">Cuántos hay</label>
-            <CampoNumero id="ar-stock" decimales={0} placeholder="0" valor={d.stock} alCambiar={(n) => setD({ ...d, stock: n })} />
+            <CampoNumero id="ar-stock" decimales={0} placeholder="Opcional" valor={d.stock} alCambiar={(n) => setD({ ...d, stock: n })} />
           </div>
           <div>
             <label className="etiqueta" htmlFor="ar-cad">Caduca el (si caduca)</label>

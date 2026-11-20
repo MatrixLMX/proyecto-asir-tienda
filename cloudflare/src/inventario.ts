@@ -59,7 +59,7 @@ inventario.post("/inventario/recuento", soloAdmin, async (c) => {
 const MAX_FILAS = 200;
 
 interface FilaValida {
-  nombre: string; codigo: string | null; categoria: string; proveedor: string | null; iva_id: number; unidad: "unidad" | "kg";
+  nombre: string; codigo: string | null; categoria: string; proveedor: string | null; iva_id: number | null; unidad: "unidad" | "kg";
   precio: number; coste: number; stock: number; minimo: number; caducidad: string | null; vida: number | null; controla: number;
   control: number;
 }
@@ -68,9 +68,9 @@ function validarFila(f: Datos, ivas: { id: number; porcentaje: number }[]): Fila
   const nombre = texto(f.nombre, "el nombre", 100, true)!;
   const unidad = String(f.unidad ?? "unidad").toLowerCase() || "unidad";
   if (unidad !== "unidad" && unidad !== "kg") throw fallo(400, "la unidad tiene que ser unidad o kg");
-  if (typeof f.iva !== "number") throw fallo(400, "falta el IVA");
-  const iva = ivas.find((i) => i.porcentaje === f.iva);
-  if (!iva) throw fallo(400, `no existe el IVA del ${f.iva} %`);
+  // El IVA (solo para el ticket) es opcional: si no viene, el de la categoría
+  const iva = f.iva === undefined || f.iva === null ? null : ivas.find((i) => i.porcentaje === f.iva);
+  if (iva === undefined) throw fallo(400, `no existe el IVA del ${String(f.iva)} %`);
   // Sin precio también entra: queda "sin precio" en Catálogo y no se vende hasta tenerlo
   const caducidad = fechaONula(f.caducidad, "la fecha de caducidad");
   const vida = f.vida_util_dias === undefined || f.vida_util_dias === null ? null : entero(f.vida_util_dias, "la vida útil", 36500) || null;
@@ -80,7 +80,7 @@ function validarFila(f: Datos, ivas: { id: number; porcentaje: number }[]): Fila
   if (unidad === "unidad" && stock % 1000 !== 0) throw fallo(400, "el stock va sin decimales en productos por unidad");
   return {
     nombre, codigo: texto(f.codigo_barras, "el código de barras", 20), categoria: texto(f.categoria, "la categoría", 50, true)!,
-    proveedor: texto(f.proveedor, "el proveedor", 80), iva_id: iva.id, unidad, precio: cent(f.precio ?? 0, "el precio"),
+    proveedor: texto(f.proveedor, "el proveedor", 80), iva_id: iva?.id ?? null, unidad, precio: cent(f.precio ?? 0, "el precio"),
     coste: dm(f.coste ?? 0, "el coste"), stock: control ? stock : 0, minimo: milli(f.stock_minimo ?? 0, "el stock mínimo"),
     caducidad, vida, controla, control,
   };
@@ -134,8 +134,9 @@ inventario.post("/productos/importar", soloAdmin, async (c: C) => {
     pasos.push(db.prepare(
       `INSERT INTO productos (nombre, codigo_barras, categoria_id, proveedor_id, iva_id, unidad_medida, precio_venta_cent, coste_medio_dm,
                               stock_minimo_milli, controla_caducidad, vida_util_dias, control_stock)
-       VALUES (?, ?, (SELECT id FROM categorias WHERE nombre = ?), (SELECT id FROM proveedores WHERE nombre = ?), ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(v.nombre, v.codigo, v.categoria, v.proveedor, v.iva_id, v.unidad, v.precio, v.coste, v.minimo, v.controla, v.vida, v.control));
+       VALUES (?, ?, (SELECT id FROM categorias WHERE nombre = ?), (SELECT id FROM proveedores WHERE nombre = ?),
+               COALESCE(?, (SELECT iva_id FROM categorias WHERE nombre = ?), (SELECT id FROM tipos_iva WHERE porcentaje_cp = 1000)), ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(v.nombre, v.codigo, v.categoria, v.proveedor, v.iva_id, v.categoria, v.unidad, v.precio, v.coste, v.minimo, v.controla, v.vida, v.control));
     if (v.stock) pasos.push(pasoLineaCompra(c, "(SELECT MAX(id) FROM productos)", v.stock, v.coste, v.caducidad));
   }
   if (validas.length) {

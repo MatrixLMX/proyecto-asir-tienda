@@ -58,14 +58,20 @@ body {
   transition: background-color 0.2s, color 0.2s;
 }
 
+/* Nada puede hacer la página más ancha que la pantalla: en el móvil obligaba
+   a alejar la vista para verla entera */
+html, body { overflow-x: clip; }
+
 /* En la capa "components" para que las utilidades (w-20, px-3...) puedan
    sobrescribirlas */
 @layer components {
   .tecla {
     @apply inline-block rounded-md border border-borde bg-superficie-2 px-1.5 py-px font-sans text-[11px] font-semibold text-suave;
   }
+  /* relative: lo oculto para lectores de pantalla (sr-only) de una tabla
+     queda dentro de la tarjeta y no ensancha la página */
   .tarjeta {
-    @apply rounded-2xl border border-borde bg-superficie shadow-sm shadow-black/[0.03];
+    @apply relative rounded-2xl border border-borde bg-superficie shadow-sm shadow-black/[0.03];
   }
 
   .boton {
@@ -80,8 +86,10 @@ body {
     @apply inline-flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 active:scale-[0.98];
   }
 
+  /* 16 px en el móvil: con menos, el iPhone se acerca solo al escribir y no
+     vuelve a alejarse (había que pellizcar para ver la pantalla entera) */
   .campo {
-    @apply w-full rounded-xl border border-borde bg-superficie px-3.5 py-2.5 text-sm text-texto outline-none transition placeholder:text-tenue focus:border-marca-500 focus:ring-4 focus:ring-marca-500/15 disabled:opacity-50;
+    @apply w-full rounded-xl border border-borde bg-superficie px-3.5 py-2.5 text-base sm:text-sm text-texto outline-none transition placeholder:text-tenue focus:border-marca-500 focus:ring-4 focus:ring-marca-500/15 disabled:opacity-50;
   }
 
   .etiqueta {
@@ -127,4 +135,9 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* Cualquier otro campo de texto, también a 16 px en el móvil (mismo motivo) */
+@media (max-width: 639px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { font-size: 16px; }
 }

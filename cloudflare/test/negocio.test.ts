@@ -113,7 +113,7 @@ describe("ofertas por cantidad", () => {
   it("el beneficio se calcula con el precio de oferta", async () => {
     await vender({ lineas: [{ producto_id: 1, cantidad: 10 }] });
     const [m] = await json<Record<string, number>[]>(admin("/informes/mensual"));
-    expect(m).toMatchObject({ facturacion: 10, base_imponible: 9.09, coste: 5, beneficio_bruto: 4.09 });
+    expect(m).toMatchObject({ facturacion: 10, base_imponible: 9.09, coste: 5, beneficio_bruto: 5 });
   });
 
   it("valida la oferta y solo la toca el administrador", async () => {
@@ -212,8 +212,9 @@ describe("devoluciones parciales", () => {
     expect((await json(dependiente(`/ventas/${v.id}`))).lineas[0].devuelto).toBe(2);
     expect(await ultimaAuditoria()).toMatchObject({ accion: "devolucion", usuario: "dep", detalle: `Ticket nº ${v.id}: 5,00 € en efectivo` });
     const [m] = await json<Record<string, number>[]>(admin("/informes/mensual"));
-    // 3 yogures a 2,50 con el 10 % de IVA y 1,00 de coste; los céntimos de base salen de restar venta y devolución
-    expect(m).toMatchObject({ facturacion: 7.5, coste: 3, base_imponible: 6.81, beneficio_bruto: 3.81 });
+    // 3 yogures a 2,50 con el 10 % de IVA y 1,00 de coste; los céntimos de base salen de restar venta y devolución.
+    // El beneficio es lo cobrado menos el coste (los dos con IVA)
+    expect(m).toMatchObject({ facturacion: 7.5, coste: 3, base_imponible: 6.81, beneficio_bruto: 4.5 });
   });
 
   it("devolver todo por partes suma justo el ticket, también a peso", async () => {

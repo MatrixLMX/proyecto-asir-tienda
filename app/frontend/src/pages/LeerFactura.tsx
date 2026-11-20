@@ -20,7 +20,7 @@ interface Leida {
 /** Lo que se pasa al formulario de compra para que el administrador lo guarde. */
 export interface CompraLeida {
   proveedor: number | ""; factura: string;
-  lineas: { producto_id: number; cantidad: number; coste_unitario: number; texto_factura: string }[];
+  lineas: { producto_id: number; cantidad: number; coste_unitario: number | null; texto_factura: string }[];
 }
 
 // "nuevo": dar de alta · "no": quitada de la lista (portes, envases…) · número: producto del catálogo
@@ -140,9 +140,11 @@ export default function LeerFactura({ alCerrar, alCargar }: { alCerrar: () => vo
   const usadas = filas.filter((f) => f.destino !== "no");
   const quitadas = filas.filter((f) => f.destino === "no");
   const nuevas = usadas.filter((f) => f.destino === "nuevo");
-  const incompletas = usadas.filter((f) => !(f.cantidad && f.cantidad > 0) || (f.destino === "nuevo" && (!f.nombre.trim() || !f.categoria || !f.iva)));
+  const incompletas = usadas.filter((f) => !(f.cantidad && f.cantidad > 0) || (f.destino === "nuevo" && (!f.nombre.trim() || !f.categoria)));
+  // Los precios de compra llevan el IVA: se comparan con el total a pagar
   const sumaLineas = filas.filter((f) => f.destino !== "no" || !f.leida.es_producto).reduce((t, f) => t + (f.cantidad ?? 0) * (f.coste ?? 0), 0);
-  const descuadre = leida?.total_sin_iva && Math.abs(sumaLineas - leida.total_sin_iva) > Math.max(0.05, leida.total_sin_iva * 0.01);
+  const faltanCostes = filas.some((f) => f.destino !== "no" && f.coste == null);
+  const descuadre = !faltanCostes && leida?.total_con_iva && Math.abs(sumaLineas - leida.total_con_iva) > Math.max(0.05, leida.total_con_iva * 0.01);
 
   async function pasarACompra() {
     setGuardando(true);
@@ -174,7 +176,7 @@ export default function LeerFactura({ alCerrar, alCargar }: { alCerrar: () => vo
       alCargar({
         proveedor: proveedor, factura,
         lineas: actuales.filter((x) => typeof x.destino === "number").map((x) => ({
-          producto_id: x.destino as number, cantidad: x.cantidad ?? 0, coste_unitario: x.coste ?? 0, texto_factura: x.leida.descripcion,
+          producto_id: x.destino as number, cantidad: x.cantidad ?? 0, coste_unitario: x.coste, texto_factura: x.leida.descripcion,
         })),
       });
     } catch (e) { avisar("error", (e as Error).message); } finally { setGuardando(false); }
@@ -253,9 +255,7 @@ export default function LeerFactura({ alCerrar, alCargar }: { alCerrar: () => vo
                 const l = f.leida;
                 const actual = typeof f.destino === "number" ? productos.datos?.find((p) => p.id === f.destino) : undefined;
                 const kg = f.destino === "nuevo" ? f.porKg : actual?.unidad_medida === "kg";
-                const pctIva = actual ? actual.iva : ivas.datos?.find((i) => i.id === f.iva)?.porcentaje;
-                const base = f.pvp && pctIva != null ? f.pvp / (1 + pctIva / 100) : null;
-                const margen = base && f.coste ? ((base - f.coste) / base) * 100 : null;
+                const margen = f.pvp && f.coste ? ((f.pvp - f.coste) / f.pvp) * 100 : null;
                 const insignia = f.destino === "nuevo" ? <Insignia color="azul">nuevo</Insignia>
                   : f.destino === l.producto_id && l.como === "nombre" ? <Insignia color="ambar">¿es este?</Insignia>
                   : <Insignia color="verde">{f.destino === l.producto_id && l.como === "aprendido" ? "reconocido" : "ya lo tienes"}</Insignia>;
@@ -287,16 +287,10 @@ export default function LeerFactura({ alCerrar, alCargar }: { alCerrar: () => vo
                           <label className="etiqueta" htmlFor={`lf-n-${f.clave}`}>Nombre en la tienda</label>
                           <input id={`lf-n-${f.clave}`} className="campo" maxLength={100} placeholder="p. ej. Galletas de chocolate" value={f.nombre} onChange={(e) => editar(f.clave, { nombre: e.target.value })} />
                         </div>
-                        <div>
+                        <div className="col-span-2">
                           <label className="etiqueta" htmlFor={`lf-cat-${f.clave}`}>Categoría</label>
                           <select id={`lf-cat-${f.clave}`} className="campo" value={f.categoria || ""} onChange={(e) => editar(f.clave, { categoria: Number(e.target.value) })}>
                             <option value="">Elige…</option>{categorias.datos?.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="etiqueta" htmlFor={`lf-iva-${f.clave}`}>IVA</label>
-                          <select id={`lf-iva-${f.clave}`} className="campo" value={f.iva || ""} onChange={(e) => editar(f.clave, { iva: Number(e.target.value) })}>
-                            <option value="">Elige…</option>{ivas.datos?.map((c) => <option key={c.id} value={c.id}>{c.porcentaje} %</option>)}
                           </select>
                         </div>
                         <div className="col-span-2 flex items-end gap-4 pb-2">
@@ -313,11 +307,11 @@ export default function LeerFactura({ alCerrar, alCargar }: { alCerrar: () => vo
                         <CampoNumero id={`lf-c-${f.clave}`} decimales={kg ? 3 : 0} valor={f.cantidad} alCambiar={(n) => editar(f.clave, { cantidad: n })} />
                       </div>
                       <div>
-                        <label className="etiqueta" htmlFor={`lf-k-${f.clave}`}>Compra sin IVA</label>
+                        <label className="etiqueta" htmlFor={`lf-k-${f.clave}`}>Compra, IVA incl.</label>
                         <CampoNumero id={`lf-k-${f.clave}`} decimales={4} valor={f.coste} alCambiar={(n) => editar(f.clave, { coste: n })} />
                       </div>
                       <div>
-                        <label className="etiqueta" htmlFor={`lf-pvp-${f.clave}`}>Venta con IVA</label>
+                        <label className="etiqueta" htmlFor={`lf-pvp-${f.clave}`}>Venta</label>
                         <CampoNumero id={`lf-pvp-${f.clave}`} placeholder="Luego" valor={f.pvp} alCambiar={(n) => editar(f.clave, { pvp: n })} />
                       </div>
                       <div className="flex flex-col justify-end pb-2 text-xs text-tenue">
@@ -357,9 +351,10 @@ export default function LeerFactura({ alCerrar, alCargar }: { alCerrar: () => vo
           {descuadre ? (
             <p className="flex gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
               <TriangleAlert className="size-4 shrink-0" />
-              <span>Las líneas suman {euros(sumaLineas)} sin IVA y la factura dice {euros(leida.total_sin_iva!)}. Revisa cantidades y precios antes de seguir.</span>
+              <span>Las líneas suman {euros(sumaLineas)} y la factura dice {euros(leida.total_con_iva!)} a pagar. Revisa cantidades y precios antes de seguir.</span>
             </p>
-          ) : leida.total_sin_iva ? <p className="text-xs text-tenue">Las líneas cuadran con el total de la factura ({euros(leida.total_sin_iva)} sin IVA).</p> : null}
+          ) : faltanCostes ? <p className="text-xs text-tenue">Las líneas sin precio de compra se guardan igual; el producto te avisará de que le falta.</p>
+            : leida.total_con_iva ? <p className="text-xs text-tenue">Las líneas cuadran con el total de la factura ({euros(leida.total_con_iva)}).</p> : null}
 
           <div className="sticky -bottom-6 -mx-1 -mb-6 flex flex-col gap-2 border-t border-borde bg-superficie px-1 pb-6 pt-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs text-tenue">{usadas.length} productos{nuevas.length ? ` · ${nuevas.length} nuevos` : ""}{incompletas.length ? ` · faltan datos en ${incompletas.length}` : ""}</p>

@@ -134,7 +134,7 @@ estadisticas.get("/estadisticas", async (c) => {
       ventas_brutas: euros(bruto), devoluciones: euros(devoluciones), num_devoluciones: n(d, "n"), ventas_netas: euros(neto),
       sin_iva: euros(base), iva: euros(importe - base), coste: euros(n(l, "coste")),
       beneficio_bruto: euros(beneficio), mermas: euros(mermas), beneficio: euros(beneficio - mermas),
-      margen: pct(beneficio - mermas, base),
+      margen: pct(beneficio - mermas, importe),
       tickets, ticket_medio: tickets ? euros(neto / tickets) : 0,
       articulos_ticket: tickets ? Math.round((n(l, "unidades") / 1000 / tickets) * 10) / 10 : 0,
       pagos: { efectivo: euros(n(v, "efectivo")), tarjeta: euros(n(v, "tarjeta")), bizum: euros(n(v, "bizum")), fiado: euros(n(v, "fiado")) },
@@ -173,7 +173,7 @@ estadisticas.get("/estadisticas", async (c) => {
     id: n(f, "producto_id"), producto: String(f.producto), categoria: String(f.categoria), unidad_medida: String(f.unidad_medida),
     activo: !!n(f, "activo"), precio_libre: !!n(f, "precio_libre"),
     unidades: n(f, "unidades") / 1000, facturacion: euros(n(f, "importe")), sin_iva: euros(n(f, "base")),
-    coste: euros(n(f, "coste")), beneficio: euros(n(f, "beneficio")), margen: pct(n(f, "beneficio"), n(f, "base")),
+    coste: euros(n(f, "coste")), beneficio: euros(n(f, "beneficio")), margen: pct(n(f, "beneficio"), n(f, "importe")),
     tickets: n(f, "tickets"),
     // Si alguna venta salió sin coste conocido, su beneficio está inflado
     sin_coste: n(f, "sin_coste") > 0,
@@ -185,7 +185,7 @@ estadisticas.get("/estadisticas", async (c) => {
     cat.set(p.categoria, x);
   }
   const categorias = [...cat.values()]
-    .map((x) => ({ ...x, facturacion: Math.round(x.facturacion * 100) / 100, beneficio: Math.round(x.beneficio * 100) / 100, margen: pct(x.beneficio, x.sin_iva), peso: pct(x.facturacion, actual.ventas_netas) }))
+    .map((x) => ({ ...x, facturacion: Math.round(x.facturacion * 100) / 100, beneficio: Math.round(x.beneficio * 100) / 100, margen: pct(x.beneficio, x.facturacion), peso: pct(x.facturacion, actual.ventas_netas) }))
     .sort((a, b) => b.facturacion - a.facturacion);
 
   const iML = indice(mLin!), iMV = indice(mVen!), iMM = indice(mMer!);
@@ -194,7 +194,7 @@ estadisticas.get("/estadisticas", async (c) => {
     const beneficio = n(l, "beneficio") - perdida;
     return {
       mes: k, facturacion: euros(n(l, "importe")), sin_iva: euros(n(l, "base")), coste: euros(n(l, "coste")),
-      mermas: euros(perdida), beneficio: euros(beneficio), margen: pct(beneficio, n(l, "base")),
+      mermas: euros(perdida), beneficio: euros(beneficio), margen: pct(beneficio, n(l, "importe")),
       tickets: t, ticket_medio: t ? euros(n(l, "importe") / t) : 0, estimacion_15: euros(n(l, "importe") * 0.15),
     };
   });
